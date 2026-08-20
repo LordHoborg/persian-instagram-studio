@@ -322,22 +322,36 @@ export async function getAIUsage(): Promise<AIUsage[]> {
     toolCalls: r.toolCalls,
     webSearchCalls: r.webSearchCalls,
     imageGenerationCount: r.imageGenerationCount,
-    estimatedTextCost: r.estimatedCost,
-    imageCost: 0,
-    webSearchCost: 0,
-    totalCost: r.estimatedCost,
+    estimatedTextCost: r.estimatedTextCost ?? r.estimatedCost,
+    imageCost: r.imageCost ?? 0,
+    webSearchCost: r.webSearchCost ?? 0,
+    totalCost: r.totalCost ?? r.estimatedCost,
     success: r.success,
     createdAt: r.createdAt,
     postId: r.postId ?? undefined,
   }))
 }
 
-export async function addAIUsage(usage: Omit<AIUsage, 'id' | 'createdAt'>): Promise<AIUsage> {
+export async function addAIUsage(usage: Omit<AIUsage, 'id' | 'createdAt'> & {
+  generationSessionId?: string
+  estimatedTextCost?: number
+  webSearchCost?: number
+  imageCost?: number
+  totalCost?: number
+  durationMs?: number
+  webSearchCalls?: number
+  cachedInputTokens?: number
+}): Promise<AIUsage> {
   await ensureInitialized()
   const id = generateId()
   const now = new Date().toISOString()
+  const estimatedTextCost = usage.estimatedTextCost ?? 0
+  const webSearchCost = usage.webSearchCost ?? 0
+  const imageCost = usage.imageCost ?? 0
+  const totalCost = usage.totalCost ?? (estimatedTextCost + webSearchCost + imageCost)
   await db.insert(aiUsage).values({
     id,
+    generationSessionId: usage.generationSessionId ?? null,
     operation: usage.operation,
     provider: usage.provider ?? 'openai',
     model: usage.model,
@@ -348,8 +362,15 @@ export async function addAIUsage(usage: Omit<AIUsage, 'id' | 'createdAt'>): Prom
     toolCalls: usage.toolCalls ?? 0,
     webSearchCalls: usage.webSearchCalls ?? 0,
     imageGenerationCount: usage.imageGenerationCount ?? 0,
-    estimatedCost: usage.totalCost ?? usage.estimatedTextCost ?? 0,
+    estimatedTextCost,
+    webSearchCost,
+    imageCost,
+    totalCost,
+    estimatedCost: totalCost,
+    durationMs: usage.durationMs ?? null,
     postId: usage.postId ?? null,
+    promptKey: usage.promptKey ?? null,
+    promptVersion: usage.promptVersion ?? null,
     success: usage.success ?? true,
     createdAt: now,
   })

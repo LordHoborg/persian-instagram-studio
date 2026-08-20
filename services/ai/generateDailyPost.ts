@@ -7,14 +7,15 @@ import { buildContentBrainContext, formatContextForPrompt } from './contentBrain
 import { buildTopicGeneratorPrompt } from '@/lib/prompts/topicGenerator'
 import { buildPostWriterPrompt } from '@/lib/prompts/postWriter'
 import { buildEditorialReviewPrompt } from '@/lib/prompts/editorialReview'
-import { GeneratedPostSchema, GeneratedIdeasSchema, QualityReviewSchema } from './schemas'
-import { researchTopic, shouldResearchTopic } from '@/services/research'
-import { getModelForOperation, MODEL_CONFIG } from './modelConfig'
+import { GeneratedPostSchema, QualityReviewSchema } from './schemas'
+import { researchTopic, shouldResearchTopic, ResearchResult } from '@/services/research'
+import { getModelForOperation } from './modelConfig'
 import { POST_WRITER_PROMPT } from '@/lib/prompts/postWriter'
 import { TOPIC_GENERATOR_PROMPT } from '@/lib/prompts/topicGenerator'
 import { EDITORIAL_REVIEW_PROMPT } from '@/lib/prompts/editorialReview'
 import { generateId } from '@/lib/utils'
 import { PostPackage } from '@/types'
+import { z } from 'zod'
 
 export interface GenerateDailyPostOptions {
   /** If provided, skip topic selection and use this topic */
@@ -29,6 +30,56 @@ export interface GenerateDailyPostResult {
   post: PostPackage
   totalCost: number
   usedResearch: boolean
+  generationSessionId: string
+}
+
+// Schema for improved topic candidates
+const TopicCandidateSchema = z.object({
+  topic: z.string().min(1),
+  pillar: z.string().default(''),
+  reason: z.string().default(''),
+  noveltyScore: z.number().min(0).max(10).default(5),
+})
+
+const TopicCandidatesSchema = z.object({
+  candidates: z.array(TopicCandidateSchema).min(1).max(10),
+})
+
+type TopicCandidate = z.infer<typeof TopicCandidateSchema>
+
+/**
+ * Select the best topic candidate using deterministic application logic.
+ * Considers: novelty score, avoided topics, pillar weights.
+ */
+function selectBestCandidate(
+  candidates: TopicCandidate[],
+  avoidedTopics: string[],
+  recentTopics: string[],
+  pillars: Array<{ name: string; weight: number }>
+): TopicCandidate | null {
+  // Filter out avoided topics
+  const filtered = candidates.filter(c => {
+    const topicLower = c.topic.toLowerCase()
+    return !avoidedTopics.some(a => topicLower.includes(a.toLowerCase()))
+  })
+
+  if (filtered.length === 0) return candidates[0] ?? null
+
+  // Filter out recently used topics
+  const notRecent = filtered.filter(c =>
+    !recentTopics.some(r => r.toLowerCase().includes(c.topic.toLowerCase().slice(0, 10)))
+  )
+  const pool = notRecent.length > 0 ? notRecent : filtered
+
+  // Score by novelty + pillar weight
+  const pillarWeightMap = new Map(pillars.map(p => [p.name, p.weight]))
+  const scored = pool.map(c => {
+    const pillarWeight = pillarWeightMap.get(c.pillar) ?? 20
+    return { candidate: c, score: c.noveltyScore * 0.7 + (pillarWeight / 100) * 3 }
+  })
+
+  scored.sort((a, b) => b.score - a.score)
+  return scored[0]?.candidate ?? null
 }
 
 /**
@@ -40,7 +91,7 @@ export interface GenerateDailyPostResult {
  * 5. Generate structured post
  * 6. Optionally run editorial review
  * 7. Save post
- * 8. Record AI usage
+ * 8. Record AI usage (all linked by generationSessionId)
  */
 export async function generateDailyPost(
   options: GenerateDailyPostOptions = {}
@@ -48,8 +99,10 @@ export async function generateDailyPost(
   const { topic: providedTopic, withReview = false, contentType = 'carousel' } = options
 
   const provider = getAIProvider()
+  const generationSessionId = generateId()
   let totalCost = 0
   let usedResearch = false
+  let researchData: ResearchResult | undefined
 
   // ── Step 1: Load Content Brain ──────────────────────────────────────────────
   const [profile, pillars, recentMemory] = await Promise.all([
@@ -63,6 +116,7 @@ export async function generateDailyPost(
 
   // ── Step 2: Select topic ────────────────────────────────────────────────────
   let selectedTopic = providedTopic
+  let selectedPillar = ''
 
   if (!selectedTopic) {
     const topicPrompts = buildTopicGeneratorPrompt({
@@ -72,17 +126,20 @@ export async function generateDailyPost(
       pillars: brainCtx.pillars,
     })
 
-    const ideasResult = await provider.generateStructured<{ ideas: string[] }>({
+    const ideasResult = await provider.generateStructured({
       operation: 'generate_ideas',
-      prompt: `${topicPrompts.system}\n\n${topicPrompts.user}`,
+      prompt: `${topicPrompts.system}\n\n${topicPrompts.user}\n\nبرای هر ایده، یک شیء JSON با فیلدهای topic، pillar، reason، و noveltyScore (0-10) برگردان.`,
+      schema: TopicCandidatesSchema,
       model: getModelForOperation('generate_ideas'),
     })
 
     await addAIUsage({
+      generationSessionId,
       operation: 'generate_ideas',
       provider: 'openai',
       model: getModelForOperation('generate_ideas'),
       inputTokens: ideasResult.usage.inputTokens,
+      cachedInputTokens: ideasResult.usage.cachedInputTokens ?? 0,
       outputTokens: ideasResult.usage.outputTokens,
       estimatedTextCost: ideasResult.usage.estimatedCost,
       imageCost: 0,
@@ -90,26 +147,62 @@ export async function generateDailyPost(
       totalCost: ideasResult.usage.estimatedCost,
       promptKey: TOPIC_GENERATOR_PROMPT.key,
       promptVersion: TOPIC_GENERATOR_PROMPT.version,
+      durationMs: ideasResult.usage.durationMs,
     })
 
     totalCost += ideasResult.usage.estimatedCost
 
-    const ideasParsed = GeneratedIdeasSchema.safeParse(ideasResult.data)
-    const ideas = ideasParsed.success ? ideasParsed.data.ideas : []
-    selectedTopic = ideas[0] ?? 'تاریخ ایران'
+    if (!ideasResult.success || !ideasResult.data) {
+      throw new Error(ideasResult.error ?? 'تولید ایده‌های موضوعی ناموفق بود')
+    }
+
+    const best = selectBestCandidate(
+      ideasResult.data.candidates.map(c => ({
+        topic: c.topic,
+        pillar: c.pillar ?? '',
+        reason: c.reason ?? '',
+        noveltyScore: c.noveltyScore ?? 5,
+      })),
+      profile.avoidedTopics ?? [],
+      recentMemory.topics,
+      brainCtx.pillars
+    )
+
+    if (!best) {
+      throw new Error('هیچ موضوع مناسبی برای تولید محتوا یافت نشد')
+    }
+
+    selectedTopic = best.topic
+    selectedPillar = best.pillar
   }
 
   // ── Step 3: Research (if needed) ────────────────────────────────────────────
   let researchContext: string | undefined
 
-  if (shouldResearchTopic(selectedTopic)) {
+  if (shouldResearchTopic(selectedTopic, selectedPillar)) {
     try {
-      const research = await researchTopic(selectedTopic)
-      researchContext = `خلاصه تحقیق:\n${research.summary}\n\nحقایق کلیدی:\n${research.keyFacts.map(f => `- ${f.claim} (اطمینان: ${f.confidence})`).join('\n')}`
+      researchData = await researchTopic(selectedTopic)
+      researchContext = `خلاصه تحقیق:\n${researchData.summary}\n\nحقایق کلیدی:\n${researchData.keyFacts.map(f => `- ${f.claim} (اطمینان: ${f.confidence})`).join('\n')}`
       usedResearch = true
-      // Research cost is included in the AI usage from researchTopic
-      // We add a nominal cost here for tracking
-      totalCost += 0.01
+
+      // Record research usage separately, linked to same session
+      await addAIUsage({
+        generationSessionId,
+        operation: 'research_topic',
+        provider: 'openai',
+        model: researchData.usage.model,
+        inputTokens: researchData.usage.inputTokens,
+        cachedInputTokens: researchData.usage.cachedInputTokens,
+        outputTokens: researchData.usage.outputTokens,
+        estimatedTextCost: researchData.usage.textCost,
+        webSearchCost: researchData.usage.webSearchCost,
+        webSearchCalls: researchData.usage.webSearchCalls,
+        imageCost: 0,
+        totalCost: researchData.usage.totalCost,
+        durationMs: researchData.usage.durationMs,
+      })
+
+      totalCost += researchData.usage.totalCost
     } catch (err) {
       console.warn('[generateDailyPost] Research failed, continuing without it:', err)
     }
@@ -124,41 +217,38 @@ export async function generateDailyPost(
     recentHooks: recentMemory.hooks,
   })
 
-  const postResult = await provider.generateStructured<unknown>({
+  const postResult = await provider.generateStructured({
     operation: 'generate_post',
     prompt: `${postPrompts.system}\n\n${postPrompts.user}`,
+    schema: GeneratedPostSchema,
     model: getModelForOperation('generate_post'),
     maxTokens: 4000,
   })
 
   if (!postResult.success || !postResult.data) {
-    throw new Error(postResult.error ?? 'Failed to generate post')
+    throw new Error(postResult.error ?? 'تولید پست ناموفق بود')
   }
 
   await addAIUsage({
+    generationSessionId,
     operation: 'generate_post',
     provider: 'openai',
     model: getModelForOperation('generate_post'),
     inputTokens: postResult.usage.inputTokens,
+    cachedInputTokens: postResult.usage.cachedInputTokens ?? 0,
     outputTokens: postResult.usage.outputTokens,
     estimatedTextCost: postResult.usage.estimatedCost,
     imageCost: 0,
-    webSearchCost: usedResearch ? 0.01 : 0,
+    webSearchCost: 0,
     totalCost: postResult.usage.estimatedCost,
     promptKey: POST_WRITER_PROMPT.key,
     promptVersion: POST_WRITER_PROMPT.version,
+    durationMs: postResult.usage.durationMs,
   })
 
   totalCost += postResult.usage.estimatedCost
 
-  // Validate with Zod
-  const postParsed = GeneratedPostSchema.safeParse(postResult.data)
-  if (!postParsed.success) {
-    console.error('[generateDailyPost] Post validation failed:', postParsed.error.flatten())
-    throw new Error('AI returned invalid post structure')
-  }
-
-  const generatedPost = postParsed.data
+  const generatedPost = postResult.data
 
   // ── Step 5: Editorial review (optional) ────────────────────────────────────
   let qualityScore: PostPackage['qualityScore'] | undefined
@@ -171,24 +261,24 @@ export async function generateDailyPost(
       caption: generatedPost.caption,
     })
 
-    const reviewResult = await provider.generateStructured<unknown>({
+    const reviewResult = await provider.generateStructured({
       operation: 'editorial_review',
       prompt: `${reviewPrompts.system}\n\n${reviewPrompts.user}`,
+      schema: QualityReviewSchema,
       model: getModelForOperation('editorial_review'),
     })
 
     if (reviewResult.success && reviewResult.data) {
-      const reviewParsed = QualityReviewSchema.safeParse(reviewResult.data)
-      if (reviewParsed.success) {
-        const { feedback: _feedback, ...scores } = reviewParsed.data
-        qualityScore = scores
-      }
+      const { feedback: _feedback, ...scores } = reviewResult.data
+      qualityScore = scores
 
       await addAIUsage({
+        generationSessionId,
         operation: 'editorial_review',
         provider: 'openai',
         model: getModelForOperation('editorial_review'),
         inputTokens: reviewResult.usage.inputTokens,
+        cachedInputTokens: reviewResult.usage.cachedInputTokens ?? 0,
         outputTokens: reviewResult.usage.outputTokens,
         estimatedTextCost: reviewResult.usage.estimatedCost,
         imageCost: 0,
@@ -196,6 +286,7 @@ export async function generateDailyPost(
         totalCost: reviewResult.usage.estimatedCost,
         promptKey: EDITORIAL_REVIEW_PROMPT.key,
         promptVersion: EDITORIAL_REVIEW_PROMPT.version,
+        durationMs: reviewResult.usage.durationMs,
       })
 
       totalCost += reviewResult.usage.estimatedCost
@@ -203,7 +294,6 @@ export async function generateDailyPost(
   }
 
   // ── Step 6: Save post ───────────────────────────────────────────────────────
-  const now = new Date().toISOString()
   const postId = generateId()
 
   const slidesWithIds = generatedPost.slides.map((s, i) => ({
@@ -212,15 +302,22 @@ export async function generateDailyPost(
     slideNumber: i + 1,
   }))
 
-  const sourcesWithIds = generatedPost.sources.map(s => ({
+  // Sources: mark verified only if they came from real research
+  const sourcesWithIds = (generatedPost.sources ?? []).map(s => ({
     ...s,
     id: s.id || generateId(),
-    verified: s.verificationStatus as 'unverified' | 'verified' | 'questionable',
+    url: s.url ?? '',
+    publisher: s.publisher ?? '',
+    date: s.date ?? '',
+    verified: 'unverified' as const, // AI-generated sources are always unverified
+    verificationStatus: 'unverified' as const,
   }))
+
+  const researchCost = researchData?.usage.totalCost ?? 0
 
   const estimatedCost = {
     textCost: postResult.usage.estimatedCost,
-    researchCost: usedResearch ? 0.01 : 0,
+    researchCost,
     imageCost: 0,
     total: totalCost,
   }
@@ -228,17 +325,21 @@ export async function generateDailyPost(
   const postToSave: Omit<PostPackage, 'id' | 'createdAt' | 'updatedAt' | 'versionHistory'> = {
     title: generatedPost.title,
     topic: generatedPost.topic,
-    contentType: generatedPost.contentType,
-    contentPillar: generatedPost.contentPillar,
-    goal: generatedPost.goal,
-    targetAudience: generatedPost.targetAudience,
+    contentType: (generatedPost.contentType ?? 'carousel') as PostPackage['contentType'],
+    contentPillar: generatedPost.contentPillar ?? '',
+    goal: generatedPost.goal ?? '',
+    targetAudience: generatedPost.targetAudience ?? '',
     hook: generatedPost.hook,
-    slides: slidesWithIds,
+    slides: slidesWithIds.map(s => ({
+      ...s,
+      visualDirection: s.visualDirection ?? '',
+      imagePrompt: s.imagePrompt ?? '',
+    })),
     caption: generatedPost.caption,
-    cta: generatedPost.cta,
-    hashtags: generatedPost.hashtags,
+    cta: generatedPost.cta ?? '',
+    hashtags: generatedPost.hashtags ?? [],
     sources: sourcesWithIds,
-    imageStyle: generatedPost.imageStyle,
+    imageStyle: generatedPost.imageStyle ?? 'modern',
     status: 'generated',
     scheduledAt: null,
     publishedAt: null,
@@ -252,5 +353,6 @@ export async function generateDailyPost(
     post: savedPost,
     totalCost,
     usedResearch,
+    generationSessionId,
   }
 }

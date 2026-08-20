@@ -1,15 +1,16 @@
 // services/ai/modelConfig.ts
 // Centralized model configuration — update here when OpenAI changes pricing or model names
+// All tiers can be overridden via environment variables.
 
 export const MODEL_CONFIG = {
   /** Low-cost routine tasks: topic gen, classification, hashtags, formatting */
-  cheap: 'gpt-4o-mini',
+  cheap: process.env.OPENAI_MODEL_CHEAP ?? 'gpt-5.6-luna',
   /** Main content generation: full Persian posts, carousel writing, captions */
-  standard: 'gpt-4o',
+  standard: process.env.OPENAI_MODEL_STANDARD ?? 'gpt-5.6-terra',
   /** High-value review: complex reasoning, fact review, editorial */
-  premium: 'o1-mini',
+  premium: process.env.OPENAI_MODEL_PREMIUM ?? 'gpt-5.6-sol',
   /** Image generation */
-  image: 'gpt-image-1',
+  image: process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2',
 } as const
 
 export type ModelTier = keyof typeof MODEL_CONFIG

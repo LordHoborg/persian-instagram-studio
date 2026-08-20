@@ -1,12 +1,13 @@
-import { AIProviderInterface, AIGenerationRequest, AIGenerationResult, AIModelConfig } from './types'
+import { AIProviderInterface, AIGenerationRequest, StructuredGenerationRequest, AIGenerationResult, AIModelConfig } from './types'
 import { PostPackage, PostSlide } from '@/types'
 import { generateId, estimateTextCost } from '@/lib/utils'
 import { MOCK_POST_TOPICS } from '@/lib/constants'
+import { MODEL_CONFIG } from './modelConfig'
 
 const MOCK_MODELS: AIModelConfig[] = [
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', costPer1kInput: 0.005, costPer1kOutput: 0.015, capabilities: ['text', 'vision', 'structured'] },
-  { id: 'gpt-4', name: 'GPT-4', provider: 'openai', costPer1kInput: 0.03, costPer1kOutput: 0.06, capabilities: ['text', 'structured'] },
-  { id: 'gpt-3.5', name: 'GPT-3.5 Turbo', provider: 'openai', costPer1kInput: 0.0005, costPer1kOutput: 0.0015, capabilities: ['text'] },
+  { id: MODEL_CONFIG.cheap, name: 'Luna (cheap)', provider: 'openai', costPer1kInput: 0.00015, costPer1kOutput: 0.0006, capabilities: ['text', 'structured'] },
+  { id: MODEL_CONFIG.standard, name: 'Terra (standard)', provider: 'openai', costPer1kInput: 0.005, costPer1kOutput: 0.015, capabilities: ['text', 'structured'] },
+  { id: MODEL_CONFIG.premium, name: 'Sol (premium)', provider: 'openai', costPer1kInput: 0.015, costPer1kOutput: 0.06, capabilities: ['text', 'structured'] },
 ]
 
 const PERSIAN_HOOKS = [
@@ -61,7 +62,7 @@ export class MockAIProvider implements AIProviderInterface {
     }
   }
 
-  async generateStructured<T>(request: AIGenerationRequest): Promise<AIGenerationResult<T>> {
+  async generateStructured<T>(request: StructuredGenerationRequest<T>): Promise<AIGenerationResult<T>> {
     await this.simulateDelay()
     const inputTokens = estimateTokens(request.prompt)
 
@@ -69,21 +70,32 @@ export class MockAIProvider implements AIProviderInterface {
     if (request.operation === 'generate_post') {
       data = this.generateMockPost(request.prompt)
     } else if (request.operation === 'generate_ideas') {
-      data = this.generateMockIdeas(request.prompt)
+      data = this.generateMockTopicCandidates()
+    } else if (request.operation === 'research_topic') {
+      data = this.generateMockResearch(request.prompt)
     } else if (request.operation === 'rewrite_slide') {
       data = this.generateMockSlideRewrite(request.prompt)
     } else if (request.operation === 'improve_hook') {
-      data = this.generateMockHook(request.prompt)
+      data = { hook: getRandom(PERSIAN_HOOKS).replace(/{topic}/g, 'این موضوع'), reasoning: 'نسخه بهبود یافته' }
+    } else if (request.operation === 'editorial_review') {
+      data = this.generateMockReview()
     } else {
       data = { result: 'mock structured response' }
     }
 
+    // Validate against provided schema
+    const validated = request.schema.safeParse(data)
+    if (!validated.success) {
+      console.warn('[MockAI] Schema validation failed for', request.operation, validated.error.flatten())
+      // Return raw data anyway in mock mode — don't break UI dev
+    }
+
     const outputTokens = estimateTokens(JSON.stringify(data))
-    const cost = estimateTextCost(inputTokens, outputTokens, request.model || 'gpt-4o')
+    const cost = estimateTextCost(inputTokens, outputTokens, request.model || MODEL_CONFIG.standard)
 
     return {
       success: true,
-      data: data as T,
+      data: (validated.success ? validated.data : data) as T,
       usage: { inputTokens, outputTokens, estimatedCost: cost },
     }
   }
@@ -171,17 +183,42 @@ export class MockAIProvider implements AIProviderInterface {
     }
   }
 
-  private generateMockIdeas(prompt: string): string[] {
-    return [
-      'تهران در دوره صفویه',
-      'زندگی خصوصی ناصرالدین شاه',
-      'تاریخچه باغ‌های ایرانی',
-      'میرزا کوچک‌خان و جنگل',
-      'داستان ساخت برج آزادی',
-      'فرهنگ چای در ایران',
-      'تاریخچه خطاطی ایرانی',
-      'زندگی عطار نیشابوری',
-    ]
+  private generateMockTopicCandidates() {
+    return {
+      candidates: [
+        { topic: 'تهران در دوره صفویه', pillar: 'تاریخ', reason: 'موضوع جذاب و کم‌تکرار', noveltyScore: 8 },
+        { topic: 'زندگی خصوصی ناصرالدین شاه', pillar: 'تاریخ', reason: 'محبوب مخاطبان', noveltyScore: 7 },
+        { topic: 'تاریخچه باغ‌های ایرانی', pillar: 'فرهنگ', reason: 'موضوع بصری مناسب', noveltyScore: 6 },
+        { topic: 'داستان ساخت برج آزادی', pillar: 'تهران قدیم', reason: 'مرتبط با پیج', noveltyScore: 9 },
+        { topic: 'فرهنگ چای در ایران', pillar: 'فرهنگ', reason: 'محتوای سبک و جذاب', noveltyScore: 5 },
+      ],
+    }
+  }
+
+  private generateMockResearch(prompt: string) {
+    const topic = prompt.includes('موضوع:') ? prompt.split('موضوع:')[1].split('\n')[0].trim() : 'موضوع'
+    return {
+      summary: `این یک خلاصه تحقیقاتی شبیه‌سازی شده درباره ${topic} است. در حالت واقعی، اطلاعات از منابع معتبر جمع‌آوری می‌شود.`,
+      keyFacts: [
+        { claim: `${topic} دارای تاریخچه‌ای غنی است`, confidence: 'high' },
+        { claim: 'این موضوع در دوره‌های مختلف تحول یافته', confidence: 'medium' },
+      ],
+      sources: [
+        { title: `دانشنامه ${topic}`, url: '', publisher: 'منبع شبیه‌سازی', publishedAt: '' },
+      ],
+    }
+  }
+
+  private generateMockReview() {
+    return {
+      hook: Math.floor(Math.random() * 3) + 7,
+      clarity: Math.floor(Math.random() * 3) + 7,
+      originality: Math.floor(Math.random() * 3) + 6,
+      persianNaturalness: Math.floor(Math.random() * 3) + 7,
+      factualConfidence: Math.floor(Math.random() * 3) + 6,
+      visualConsistency: Math.floor(Math.random() * 3) + 7,
+      feedback: 'محتوای خوبی است. پیشنهاد می‌شود hook قوی‌تری استفاده شود.',
+    }
   }
 
   private generateMockSlideRewrite(prompt: string): PostSlide {
@@ -196,9 +233,7 @@ export class MockAIProvider implements AIProviderInterface {
     }
   }
 
-  private generateMockHook(prompt: string): string {
-    return getRandom(PERSIAN_HOOKS).replace(/{topic}/g, 'این موضوع')
-  }
+
 
   private getRandomPersianHeadline(): string {
     const headlines = [

@@ -17,12 +17,14 @@ export async function generatePost(topic: string, contentType: string = 'carouse
 }
 
 export async function generateIdeas(): Promise<{ ideas: string[]; cost: number }> {
-  const { generateDailyPost } = await import('@/services/ai/generateDailyPost')
   // Just generate ideas without a full post
   const provider = getAIProvider()
-  const result = await provider.generateStructured<{ ideas: string[] }>({
+  const { z } = await import('zod')
+  const IdeasSchema = z.object({ ideas: z.array(z.string()).min(1) })
+  const result = await provider.generateStructured({
     operation: 'generate_ideas',
     prompt: '۱۰ ایده جذاب برای پست اینستاگرام درباره تاریخ و فرهنگ ایران پیشنهاد بده.\n\nخروجی JSON: {"ideas": ["ایده ۱", "ایده ۲", ...]}',
+    schema: IdeasSchema,
     model: getModelForOperation('generate_ideas'),
   })
 
@@ -61,9 +63,10 @@ export async function rewriteSlide(
     brandContext: '',
   })
 
-  const result = await provider.generateStructured<unknown>({
+  const result = await provider.generateStructured({
     operation: 'rewrite_slide',
     prompt: `${prompts.system}\n\n${prompts.user}`,
+    schema: RewrittenSlideSchema,
     model,
   })
 
@@ -113,9 +116,10 @@ export async function improveHook(
     brandContext: '',
   })
 
-  const result = await provider.generateStructured<unknown>({
+  const result = await provider.generateStructured({
     operation: 'improve_hook',
     prompt: `${prompts.system}\n\n${prompts.user}`,
+    schema: HookImprovementSchema,
     model,
   })
 

@@ -109,6 +109,7 @@ export const sources = sqliteTable('sources', {
 // ─── ai_usage ────────────────────────────────────────────────────────────────
 export const aiUsage = sqliteTable('ai_usage', {
   id: text('id').primaryKey(),
+  generationSessionId: text('generation_session_id'),
   operation: text('operation').notNull(),
   provider: text('provider').notNull().default('openai'),
   model: text('model').notNull(),
@@ -119,7 +120,13 @@ export const aiUsage = sqliteTable('ai_usage', {
   toolCalls: integer('tool_calls').notNull().default(0),
   webSearchCalls: integer('web_search_calls').notNull().default(0),
   imageGenerationCount: integer('image_generation_count').notNull().default(0),
+  estimatedTextCost: real('estimated_text_cost').notNull().default(0),
+  webSearchCost: real('web_search_cost').notNull().default(0),
+  imageCost: real('image_cost').notNull().default(0),
+  totalCost: real('total_cost').notNull().default(0),
+  /** @deprecated use totalCost */
   estimatedCost: real('estimated_cost').notNull().default(0),
+  durationMs: integer('duration_ms'),
   postId: text('post_id'),
   promptKey: text('prompt_key'),
   promptVersion: integer('prompt_version'),
