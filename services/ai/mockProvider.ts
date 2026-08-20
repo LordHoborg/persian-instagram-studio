@@ -123,6 +123,7 @@ export class MockAIProvider implements AIProviderInterface {
     const slides: PostSlide[] = []
 
     slides.push({
+      id: generateId(),
       slideNumber: 1,
       type: 'cover',
       headline: topic,
@@ -133,6 +134,7 @@ export class MockAIProvider implements AIProviderInterface {
 
     for (let i = 2; i <= slideCount; i++) {
       slides.push({
+        id: generateId(),
         slideNumber: i,
         type: i === slideCount ? 'cta' : 'content',
         headline: `نکته ${i - 1}: ${this.getRandomPersianHeadline()}`,
@@ -156,14 +158,15 @@ export class MockAIProvider implements AIProviderInterface {
       cta: getRandom(PERSIAN_CTAS),
       hashtags: ['#تاریخ_ایران', '#فرهنگ', '#دانستنی', '#ایران', `#${topic.replace(/\s/g, '_')}`],
       sources: [
-        { id: generateId(), title: `دانشنامه ${topic}`, url: '', publisher: 'منبع معتبر', date: '', verified: 'unverified' },
+        { id: generateId(), title: `دانشنامه ${topic}`, url: '', publisher: 'منبع معتبر', date: '', verified: 'unverified', verificationStatus: 'unverified' },
       ],
       imageStyle: getRandom(['editorial', 'historical', 'minimal', 'modern']),
       status: 'generated',
       createdAt: new Date().toISOString(),
       scheduledAt: null,
       publishedAt: null,
-      estimatedCost: { textCost: 0.08, imageCost: 0.12, total: 0.20 },
+      estimatedCost: { textCost: 0.08, researchCost: 0, imageCost: 0.12, total: 0.20 },
+      updatedAt: new Date().toISOString(),
       versionHistory: [],
     }
   }
@@ -183,6 +186,7 @@ export class MockAIProvider implements AIProviderInterface {
 
   private generateMockSlideRewrite(prompt: string): PostSlide {
     return {
+      id: generateId(),
       slideNumber: 1,
       type: 'content',
       headline: 'نسخه بازنویسی شده',

@@ -1,10 +1,12 @@
 export interface PostSlide {
+  id: string
   slideNumber: number
   type: 'cover' | 'content' | 'quote' | 'cta' | 'source'
   headline: string
   body: string
   visualDirection: string
   imagePrompt: string
+  imageAssetId?: string | null
   renderedHtml?: string
 }
 
@@ -15,6 +17,7 @@ export interface Source {
   publisher: string
   date: string
   verified: 'unverified' | 'verified' | 'questionable'
+  verificationStatus: 'unverified' | 'verified' | 'questionable' | 'demo'
 }
 
 export interface PostPackage {
@@ -34,13 +37,10 @@ export interface PostPackage {
   imageStyle: string
   status: 'idea' | 'draft' | 'generated' | 'review' | 'approved' | 'scheduled' | 'published' | 'archived'
   createdAt: string
+  updatedAt: string
   scheduledAt: string | null
   publishedAt: string | null
-  estimatedCost: {
-    textCost: number
-    imageCost: number
-    total: number
-  }
+  estimatedCost: CostSummary
   qualityScore?: {
     hook: number
     clarity: number
@@ -99,6 +99,13 @@ export interface BrandProfile {
   customInstructions: string
 }
 
+export interface CostSummary {
+  textCost: number
+  researchCost: number
+  imageCost: number
+  total: number
+}
+
 export interface AIUsage {
   id: string
   operation: string
@@ -111,6 +118,15 @@ export interface AIUsage {
   totalCost: number
   createdAt: string
   postId?: string
+  cachedInputTokens?: number
+  reasoningTokens?: number
+  toolCalls?: number
+  webSearchCalls?: number
+  imageGenerationCount?: number
+  success?: boolean
+  provider?: string
+  promptKey?: string
+  promptVersion?: number
 }
 
 export interface AutomationSettings {

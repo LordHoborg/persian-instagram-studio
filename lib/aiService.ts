@@ -1,139 +1,179 @@
 'use server'
 
-import { mockAIProvider } from '@/services/ai/mockProvider'
-import { AIGenerationRequest } from '@/services/ai/types'
-import { PostPackage, PostSlide } from '@/types'
+import { getAIProvider } from '@/services/ai/provider'
 import { addAIUsage } from './db'
-import { estimateImageCost } from './utils'
+import { PostSlide } from '@/types'
+import { getModelForOperation } from '@/services/ai/modelConfig'
+import { calculateImageCost } from './ai/pricing'
+import { buildImproveHookPrompt, buildRewriteSlidePrompt } from './prompts/carouselWriter'
+import { RewrittenSlideSchema, HookImprovementSchema } from '@/services/ai/schemas'
+import { generateId } from './utils'
 
-const USE_MOCK = process.env.USE_MOCK_AI !== 'false'
+export { generateDailyPost } from '@/services/ai/generateDailyPost'
 
-const provider = USE_MOCK ? mockAIProvider : mockAIProvider // TODO: swap for OpenAIProvider
-
-export async function generatePost(topic: string, contentType: string = 'carousel'): Promise<{ post: PostPackage; cost: number }> {
-  const request: AIGenerationRequest = {
-    operation: 'generate_post',
-    prompt: `موضوع: ${topic}\nنوع محتوا: ${contentType}\nلطفاً یک پست کامل اینستاگرام به فارسی تولید کنید.`,
-    model: 'gpt-4o',
-  }
-
-  const result = await provider.generateStructured<PostPackage>(request)
-  if (!result.success || !result.data) {
-    throw new Error(result.error || 'Failed to generate post')
-  }
-
-  const imageCost = estimateImageCost(result.data.slides?.length || 1)
-  const totalCost = (result.usage.estimatedCost || 0) + imageCost
-
-  await addAIUsage({
-    operation: 'generate_post',
-    model: request.model || 'gpt-4o',
-    inputTokens: result.usage.inputTokens,
-    outputTokens: result.usage.outputTokens,
-    estimatedTextCost: result.usage.estimatedCost || 0,
-    imageCost,
-    webSearchCost: 0,
-    totalCost,
-    postId: result.data.id,
-  })
-
-  return { post: result.data, cost: totalCost }
+export async function generatePost(topic: string, contentType: string = 'carousel') {
+  const { generateDailyPost } = await import('@/services/ai/generateDailyPost')
+  return generateDailyPost({ topic, contentType })
 }
 
 export async function generateIdeas(): Promise<{ ideas: string[]; cost: number }> {
-  const request: AIGenerationRequest = {
+  const { generateDailyPost } = await import('@/services/ai/generateDailyPost')
+  // Just generate ideas without a full post
+  const provider = getAIProvider()
+  const result = await provider.generateStructured<{ ideas: string[] }>({
     operation: 'generate_ideas',
-    prompt: '۱۰ ایده جذاب برای پست اینستاگرام درباره تاریخ و فرهنگ ایران پیشنهاد بده.',
-    model: 'gpt-3.5',
-  }
+    prompt: '۱۰ ایده جذاب برای پست اینستاگرام درباره تاریخ و فرهنگ ایران پیشنهاد بده.\n\nخروجی JSON: {"ideas": ["ایده ۱", "ایده ۲", ...]}',
+    model: getModelForOperation('generate_ideas'),
+  })
 
-  const result = await provider.generateStructured<string[]>(request)
   if (!result.success || !result.data) {
-    throw new Error(result.error || 'Failed to generate ideas')
+    throw new Error(result.error ?? 'Failed to generate ideas')
   }
 
   await addAIUsage({
     operation: 'generate_ideas',
-    model: request.model || 'gpt-3.5',
+    provider: 'openai',
+    model: getModelForOperation('generate_ideas'),
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,
-    estimatedTextCost: result.usage.estimatedCost || 0,
+    estimatedTextCost: result.usage.estimatedCost,
     imageCost: 0,
     webSearchCost: 0,
-    totalCost: result.usage.estimatedCost || 0,
+    totalCost: result.usage.estimatedCost,
   })
 
-  return { ideas: result.data, cost: result.usage.estimatedCost || 0 }
+  const ideas = Array.isArray(result.data.ideas) ? result.data.ideas : []
+  return { ideas, cost: result.usage.estimatedCost }
 }
 
-export async function rewriteSlide(slide: PostSlide, instruction: string): Promise<{ slide: PostSlide; cost: number }> {
-  const request: AIGenerationRequest = {
-    operation: 'rewrite_slide',
-    prompt: `اسلاید: ${JSON.stringify(slide)}\nدستور: ${instruction}`,
-    model: 'gpt-4o',
-  }
+export async function rewriteSlide(
+  slide: PostSlide,
+  instruction: string
+): Promise<{ slide: PostSlide; cost: number }> {
+  const provider = getAIProvider()
+  const model = getModelForOperation('rewrite_slide')
 
-  const result = await provider.generateStructured<PostSlide>(request)
+  const prompts = buildRewriteSlidePrompt({
+    slideHeadline: slide.headline,
+    slideBody: slide.body,
+    slideType: slide.type,
+    instruction,
+    brandContext: '',
+  })
+
+  const result = await provider.generateStructured<unknown>({
+    operation: 'rewrite_slide',
+    prompt: `${prompts.system}\n\n${prompts.user}`,
+    model,
+  })
+
   if (!result.success || !result.data) {
-    throw new Error(result.error || 'Failed to rewrite slide')
+    throw new Error(result.error ?? 'Failed to rewrite slide')
   }
 
   await addAIUsage({
     operation: 'rewrite_slide',
-    model: request.model || 'gpt-4o',
+    provider: 'openai',
+    model,
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,
-    estimatedTextCost: result.usage.estimatedCost || 0,
+    estimatedTextCost: result.usage.estimatedCost,
     imageCost: 0,
     webSearchCost: 0,
-    totalCost: result.usage.estimatedCost || 0,
+    totalCost: result.usage.estimatedCost,
   })
 
-  return { slide: result.data, cost: result.usage.estimatedCost || 0 }
-}
-
-export async function improveHook(currentHook: string): Promise<{ hook: string; cost: number }> {
-  const request: AIGenerationRequest = {
-    operation: 'improve_hook',
-    prompt: `hook فعلی: ${currentHook}\nلطفاً hook جذاب‌تری بنویسید.`,
-    model: 'gpt-4o',
+  const parsed = RewrittenSlideSchema.safeParse(result.data)
+  if (!parsed.success) {
+    throw new Error('Invalid slide rewrite response')
   }
 
-  const result = await provider.generateStructured<string>(request)
+  return {
+    slide: {
+      ...slide,
+      headline: parsed.data.headline,
+      body: parsed.data.body,
+      visualDirection: parsed.data.visualDirection ?? slide.visualDirection,
+      imagePrompt: parsed.data.imagePrompt ?? slide.imagePrompt,
+    },
+    cost: result.usage.estimatedCost,
+  }
+}
+
+export async function improveHook(
+  currentHook: string,
+  topic = ''
+): Promise<{ hook: string; cost: number }> {
+  const provider = getAIProvider()
+  const model = getModelForOperation('improve_hook')
+
+  const prompts = buildImproveHookPrompt({
+    currentHook,
+    topic,
+    brandContext: '',
+  })
+
+  const result = await provider.generateStructured<unknown>({
+    operation: 'improve_hook',
+    prompt: `${prompts.system}\n\n${prompts.user}`,
+    model,
+  })
+
   if (!result.success || !result.data) {
-    throw new Error(result.error || 'Failed to improve hook')
+    throw new Error(result.error ?? 'Failed to improve hook')
   }
 
   await addAIUsage({
     operation: 'improve_hook',
-    model: request.model || 'gpt-4o',
+    provider: 'openai',
+    model,
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,
-    estimatedTextCost: result.usage.estimatedCost || 0,
+    estimatedTextCost: result.usage.estimatedCost,
     imageCost: 0,
     webSearchCost: 0,
-    totalCost: result.usage.estimatedCost || 0,
+    totalCost: result.usage.estimatedCost,
   })
 
-  return { hook: result.data, cost: result.usage.estimatedCost || 0 }
+  const parsed = HookImprovementSchema.safeParse(result.data)
+  if (!parsed.success) {
+    throw new Error('Invalid hook improvement response')
+  }
+
+  return { hook: parsed.data.hook, cost: result.usage.estimatedCost }
 }
 
-export async function generateHeroImage(prompt: string): Promise<{ url: string; cost: number }> {
-  const result = await provider.generateImage!(prompt, '1024x1024')
-  if (!result.success || !result.data) {
-    throw new Error(result.error || 'Failed to generate image')
+export async function generateHeroImage(
+  prompt: string
+): Promise<{ url: string; cost: number }> {
+  const provider = getAIProvider()
+  const model = 'gpt-image-1'
+
+  if (!provider.generateImage) {
+    throw new Error('Image generation not supported by current provider')
   }
+
+  const result = await provider.generateImage(prompt, '1024x1024')
+
+  if (!result.success || !result.data) {
+    throw new Error(result.error ?? 'Failed to generate image')
+  }
+
+  // Image cost is based on actual generation count (1), NOT slide count
+  const imageCost = calculateImageCost(model, 1)
 
   await addAIUsage({
     operation: 'generate_image',
-    model: 'dall-e-3',
+    provider: 'openai',
+    model,
     inputTokens: 0,
     outputTokens: 0,
     estimatedTextCost: 0,
-    imageCost: result.usage.estimatedCost || 0.04,
+    imageCost,
+    imageGenerationCount: 1,
     webSearchCost: 0,
-    totalCost: result.usage.estimatedCost || 0.04,
+    totalCost: imageCost,
   })
 
-  return { url: result.data, cost: result.usage.estimatedCost || 0.04 }
+  return { url: result.data, cost: imageCost }
 }
