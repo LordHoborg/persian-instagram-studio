@@ -42,15 +42,15 @@ const FALLBACK_CACHED_INPUT_PER_MILLION = parseFloat(
 export const TEXT_MODEL_PRICING: Record<string, TextPricing> = {
   // Primary models
   'gpt-5.6-luna': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_INPUT ?? '1.00'),
+    inputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_INPUT ?? '0.20'),
     cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_CACHED ?? '0.02'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_OUTPUT ?? '6.00'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_OUTPUT ?? '1.20'),
     metadata: VERIFIED_PRICING_METADATA,
   },
   'gpt-5.6-terra': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_INPUT ?? '2.50'),
+    inputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_INPUT ?? '2.00'),
     cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_CACHED ?? '0.20'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_OUTPUT ?? '15.00'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_OUTPUT ?? '12.00'),
     metadata: VERIFIED_PRICING_METADATA,
   },
   'gpt-5.6-sol': {
