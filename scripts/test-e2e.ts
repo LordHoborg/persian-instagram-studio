@@ -57,6 +57,31 @@ async function main() {
     console.log(`\n🔍 Web search used: ${result.usedResearch}`)
     console.log(`💾 Saved post ID:   ${result.post.id}`)
 
+    // ── Source verification report ──────────────────────────────────────────
+    const allSources = result.post.sources ?? []
+    const verifiedSources = allSources.filter(s => s.verificationStatus === 'verified')
+    const unverifiedSources = allSources.filter(s => s.verificationStatus !== 'verified')
+
+    console.log(`\n📚 Sources (${allSources.length} total):`)
+    console.log(`   ✅ Verified (web search): ${verifiedSources.length}`)
+    console.log(`   ⚠️  Unverified (model-generated): ${unverifiedSources.length}`)
+
+    if (verifiedSources.length > 0) {
+      console.log('\n   Verified sources:')
+      verifiedSources.forEach((s, i) => {
+        console.log(`     [${i + 1}] ${s.title}`)
+        console.log(`          URL: ${s.url || '(none)'}`)
+        if (s.publisher) console.log(`          Publisher: ${s.publisher}`)
+      })
+    }
+
+    if (unverifiedSources.length > 0) {
+      console.log('\n   Unverified (model-generated) sources:')
+      unverifiedSources.forEach((s, i) => {
+        console.log(`     [${i + 1}] ${s.title} — ${s.url || '(no URL)'}`)
+      })
+    }
+
     console.log('\n✅ E2E test passed!')
   } catch (err) {
     console.error('\n❌ E2E test failed:')
