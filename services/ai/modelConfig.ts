@@ -1,6 +1,6 @@
 // services/ai/modelConfig.ts
-// Centralized model configuration — update here when OpenAI changes pricing or model names
-// All tiers can be overridden via environment variables.
+// Centralized model configuration.
+// Defaults verified against the current OpenAI API model list and can be overridden via environment variables.
 
 export const MODEL_CONFIG = {
   /** Low-cost routine tasks: topic gen, classification, hashtags, formatting */

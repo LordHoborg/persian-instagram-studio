@@ -1,4 +1,4 @@
-import { AIProviderInterface, AIGenerationRequest, StructuredGenerationRequest, AIGenerationResult, AIModelConfig } from './types'
+import { AIProviderInterface, AIGenerationRequest, StructuredGenerationRequest, AIGenerationResult, AIModelConfig, GeneratedImageResult, ResearchSource } from './types'
 import { PostPackage, PostSlide } from '@/types'
 import { generateId, estimateTextCost } from '@/lib/utils'
 import { MOCK_POST_TOPICS } from '@/lib/constants'
@@ -72,7 +72,7 @@ export class MockAIProvider implements AIProviderInterface {
     } else if (request.operation === 'generate_ideas') {
       data = this.generateMockTopicCandidates()
     } else if (request.operation === 'research_topic') {
-      data = this.generateMockResearch(request.prompt)
+      data = this.generateMockResearchSummary(request.prompt)
     } else if (request.operation === 'rewrite_slide') {
       data = this.generateMockSlideRewrite(request.prompt)
     } else if (request.operation === 'improve_hook') {
@@ -83,11 +83,9 @@ export class MockAIProvider implements AIProviderInterface {
       data = { result: 'mock structured response' }
     }
 
-    // Validate against provided schema
     const validated = request.schema.safeParse(data)
     if (!validated.success) {
       console.warn('[MockAI] Schema validation failed for', request.operation, validated.error.flatten())
-      // Return raw data anyway in mock mode — don't break UI dev
     }
 
     const outputTokens = estimateTokens(JSON.stringify(data))
@@ -100,14 +98,45 @@ export class MockAIProvider implements AIProviderInterface {
     }
   }
 
-  async generateImage(prompt: string, size?: string): Promise<AIGenerationResult<string>> {
+  async researchWithWebSearch(request: StructuredGenerationRequest<unknown>): Promise<AIGenerationResult<unknown>> {
+    await this.simulateDelay()
+    const inputTokens = estimateTokens(request.prompt)
+    const summary = this.generateMockResearchSummary(request.prompt)
+    const sources = this.generateMockResearchSources(request.prompt)
+    const outputTokens = estimateTokens(JSON.stringify(summary))
+    const cost = estimateTextCost(inputTokens, outputTokens, request.model || MODEL_CONFIG.standard)
+
+    return {
+      success: true,
+      data: {
+        summary,
+        sources,
+      },
+      usage: {
+        inputTokens,
+        outputTokens,
+        estimatedCost: cost,
+        webSearchCalls: 1,
+        webSearchCost: 0.01,
+        toolCalls: 1,
+      },
+    }
+  }
+
+  async generateImage(prompt: string, size = '1024x1024'): Promise<AIGenerationResult<GeneratedImageResult>> {
     await this.simulateDelay(1500)
     const colors = ['1a1a2e', '0f172a', '3d2b1f', 'fafafa', 'fef3c7']
     const color = colors[Math.floor(Math.random() * colors.length)]
     return {
       success: true,
-      data: `https://placehold.co/1080x1350/${color}/ffffff?text=AI+Generated&font=vazirmatn`,
-      usage: { inputTokens: 0, outputTokens: 0, estimatedCost: 0.04 },
+      data: {
+        assetType: 'url',
+        data: `https://placehold.co/1080x1350/${color}/ffffff?text=AI+Generated&font=vazirmatn`,
+        mimeType: 'image/png',
+        model: MODEL_CONFIG.image,
+        size,
+      },
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCost: 0.04, imageGenerationCount: 1, imageCost: 0.04 },
     }
   }
 
@@ -126,7 +155,7 @@ export class MockAIProvider implements AIProviderInterface {
   }
 
   private generateMockPost(prompt: string): PostPackage {
-    const topic = prompt.includes('موضوع:') 
+    const topic = prompt.includes('موضوع:')
       ? prompt.split('موضوع:')[1].split('\n')[0].trim()
       : getRandom(MOCK_POST_TOPICS)
 
@@ -195,18 +224,39 @@ export class MockAIProvider implements AIProviderInterface {
     }
   }
 
-  private generateMockResearch(prompt: string) {
+  private generateMockResearchSummary(prompt: string) {
     const topic = prompt.includes('موضوع:') ? prompt.split('موضوع:')[1].split('\n')[0].trim() : 'موضوع'
     return {
       summary: `این یک خلاصه تحقیقاتی شبیه‌سازی شده درباره ${topic} است. در حالت واقعی، اطلاعات از منابع معتبر جمع‌آوری می‌شود.`,
       keyFacts: [
-        { claim: `${topic} دارای تاریخچه‌ای غنی است`, confidence: 'high' },
-        { claim: 'این موضوع در دوره‌های مختلف تحول یافته', confidence: 'medium' },
-      ],
-      sources: [
-        { title: `دانشنامه ${topic}`, url: '', publisher: 'منبع شبیه‌سازی', publishedAt: '' },
+        { claim: `${topic} دارای تاریخچه‌ای غنی است`, confidence: 'high', sourceIds: ['source_1'] },
+        { claim: 'این موضوع در دوره‌های مختلف تحول یافته', confidence: 'medium', sourceIds: ['source_2'] },
       ],
     }
+  }
+
+  private generateMockResearchSources(prompt: string): ResearchSource[] {
+    const topic = prompt.includes('موضوع:') ? prompt.split('موضوع:')[1].split('\n')[0].trim() : 'موضوع'
+    return [
+      {
+        id: 'source_1',
+        title: `دانشنامه ${topic}`,
+        url: 'https://example.com/source-1',
+        publisher: 'منبع شبیه‌سازی',
+        publishedAt: undefined,
+        provenance: 'openai_web_search',
+        verificationStatus: 'verified',
+      },
+      {
+        id: 'source_2',
+        title: `آرشیو ${topic}`,
+        url: 'https://example.com/source-2',
+        publisher: 'آرشیو شبیه‌سازی',
+        publishedAt: undefined,
+        provenance: 'openai_web_search',
+        verificationStatus: 'verified',
+      },
+    ]
   }
 
   private generateMockReview() {
@@ -232,8 +282,6 @@ export class MockAIProvider implements AIProviderInterface {
       imagePrompt: 'Improved illustration',
     }
   }
-
-
 
   private getRandomPersianHeadline(): string {
     const headlines = [

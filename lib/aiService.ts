@@ -1,5 +1,3 @@
-'use server'
-
 import { getAIProvider } from '@/services/ai/provider'
 import { addAIUsage } from './db'
 import { PostSlide } from '@/types'
@@ -151,7 +149,7 @@ export async function generateHeroImage(
   prompt: string
 ): Promise<{ url: string; cost: number }> {
   const provider = getAIProvider()
-  const model = 'gpt-image-1'
+  const model = getModelForOperation('generate_image')
 
   if (!provider.generateImage) {
     throw new Error('Image generation not supported by current provider')
@@ -163,8 +161,7 @@ export async function generateHeroImage(
     throw new Error(result.error ?? 'Failed to generate image')
   }
 
-  // Image cost is based on actual generation count (1), NOT slide count
-  const imageCost = calculateImageCost(model, 1)
+  const imageCost = result.usage.imageCost ?? calculateImageCost(model, 1, { size: result.data.size })
 
   await addAIUsage({
     operation: 'generate_image',
@@ -174,10 +171,14 @@ export async function generateHeroImage(
     outputTokens: 0,
     estimatedTextCost: 0,
     imageCost,
-    imageGenerationCount: 1,
+    imageGenerationCount: result.usage.imageGenerationCount ?? 1,
     webSearchCost: 0,
     totalCost: imageCost,
   })
 
-  return { url: result.data, cost: imageCost }
+  if (result.data.assetType === 'base64') {
+    return { url: `data:${result.data.mimeType};base64,${result.data.data}`, cost: imageCost }
+  }
+
+  return { url: result.data.data, cost: imageCost }
 }

@@ -5,9 +5,10 @@ import path from 'path'
 import fs from 'fs'
 
 const DB_PATH = process.env.DATABASE_URL ?? './data/studio.db'
+const RESOLVED_DB_PATH = path.isAbsolute(DB_PATH) ? DB_PATH : path.join(process.cwd(), DB_PATH)
 
 // Ensure data directory exists
-const dbDir = path.dirname(path.resolve(DB_PATH))
+const dbDir = path.dirname(RESOLVED_DB_PATH)
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true })
 }
@@ -19,7 +20,7 @@ declare global {
 }
 
 function createDb() {
-  const sqlite = new Database(DB_PATH)
+  const sqlite = new Database(RESOLVED_DB_PATH)
   // Enable WAL mode for better concurrent read performance
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')

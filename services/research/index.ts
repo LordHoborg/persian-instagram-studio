@@ -1,128 +1,151 @@
 // services/research/index.ts
-import { ResearchResultSchema } from '@/services/ai/schemas'
+import { z } from 'zod'
 import { getAIProvider } from '@/services/ai/provider'
 import { MODEL_CONFIG } from '@/services/ai/modelConfig'
 import { calculateWebSearchCost } from '@/lib/ai/pricing'
+import type { ResearchResultData, ResearchSource, ResearchUsageDetails } from '@/services/ai/types'
 
-export interface ResearchUsage {
-  model: string
-  inputTokens: number
-  cachedInputTokens: number
-  outputTokens: number
-  webSearchCalls: number
-  textCost: number
-  webSearchCost: number
-  totalCost: number
-  durationMs: number
+const ResearchSummarySchema = z.object({
+  summary: z.string(),
+  keyFacts: z.array(z.object({
+    claim: z.string(),
+    confidence: z.enum(['high', 'medium', 'low']),
+    sourceIds: z.array(z.string()).optional(),
+  })).default([]),
+})
+
+type ResearchSummary = z.infer<typeof ResearchSummarySchema>
+
+function dedupeSources(sources: ResearchSource[]): ResearchSource[] {
+  const seen = new Set<string>()
+  const deduped: ResearchSource[] = []
+
+  for (const source of sources) {
+    const normalizedUrl = source.url?.trim()
+    if (!normalizedUrl) continue
+
+    if (seen.has(normalizedUrl)) continue
+    seen.add(normalizedUrl)
+
+    deduped.push({
+      ...source,
+      url: normalizedUrl,
+    })
+  }
+
+  return deduped
 }
 
-export interface ResearchResult {
-  summary: string
-  keyFacts: Array<{ claim: string; confidence: 'high' | 'medium' | 'low' }>
-  sources: Array<{
-    title: string
-    url: string
-    publisher?: string
-    publishedAt?: string
-    /** true only when returned by a real web search tool */
-    verified: boolean
-  }>
-  usage: ResearchUsage
+function buildFallbackUsage(model: string, durationMs: number): ResearchUsageDetails {
+  return {
+    model,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    webSearchCalls: 0,
+    textCost: 0,
+    webSearchCost: 0,
+    totalCost: 0,
+    durationMs,
+    toolCalls: 0,
+  }
 }
 
-/**
- * Research a topic using OpenAI web search capabilities.
- * Only call this for factual/historical/scientific content — not for trivial rewrites.
- */
-export async function researchTopic(topic: string): Promise<ResearchResult> {
+export async function researchTopic(topic: string): Promise<ResearchResultData> {
   const provider = getAIProvider()
   const model = MODEL_CONFIG.standard
   const start = Date.now()
 
-  const prompt = `درباره موضوع زیر تحقیق کن و اطلاعات دقیق و قابل اعتماد ارائه بده:
+  if (!provider.researchWithWebSearch) {
+    throw new Error('Current AI provider does not support real web search research.')
+  }
+
+  const prompt = `موضوع زیر را با استفاده از جست‌وجوی وب واقعی بررسی کن و فقط بر اساس نتایج واقعی جمع‌بندی کن.
 
 موضوع: ${topic}
 
-اطلاعات باید شامل:
-- خلاصه‌ای از موضوع (۲-۳ پاراگراف)
-- حقایق کلیدی با سطح اطمینان
-- منابع معتبر (فقط منابعی که واقعاً وجود دارند)
+خروجی باید شامل این موارد باشد:
+- summary: خلاصه دقیق و کوتاه به فارسی
+- keyFacts: فهرست ادعاهای مهم با confidence و در صورت امکان sourceIds
 
-فقط اطلاعاتی که از منابع معتبر تأیید شده را ارائه بده. اطلاعات جعلی نده.
+قواعد مهم:
+- از خودت منبع نساز
+- URLها را تغییر نده
+- اگر برای ادعایی منبع مشخصی نداری، sourceIds را خالی بگذار
+- فقط JSON معتبر برگردان`
 
-خروجی را به صورت JSON برگردان:
-{
-  "summary": "خلاصه موضوع",
-  "keyFacts": [
-    {"claim": "ادعا", "confidence": "high|medium|low"}
-  ],
-  "sources": [
-    {"title": "عنوان منبع", "url": "آدرس", "publisher": "ناشر", "publishedAt": "تاریخ"}
-  ]
-}`
-
-  // Import schema locally to avoid circular dep
-  const { ResearchResultSchema: schema } = await import('@/services/ai/schemas')
-
-  const result = await provider.generateStructured({
+  const result = await provider.researchWithWebSearch({
     operation: 'research_topic',
     prompt,
-    schema,
+    schema: ResearchSummarySchema,
     model,
     maxTokens: 2000,
   })
 
   const durationMs = Date.now() - start
-  const usageMeta = result.usage
-
-  // Web search calls: if the provider tracked them, use that; otherwise estimate 1 if research ran
-  const webSearchCalls = usageMeta.webSearchCalls ?? (result.success ? 1 : 0)
-  const webSearchCost = calculateWebSearchCost(webSearchCalls)
-  const textCost = usageMeta.estimatedCost
-
-  const usage: ResearchUsage = {
-    model,
-    inputTokens: usageMeta.inputTokens,
-    cachedInputTokens: usageMeta.cachedInputTokens ?? 0,
-    outputTokens: usageMeta.outputTokens,
-    webSearchCalls,
-    textCost,
-    webSearchCost,
-    totalCost: textCost + webSearchCost,
-    durationMs,
-  }
 
   if (!result.success || !result.data) {
     return {
       summary: `اطلاعاتی درباره ${topic} یافت نشد.`,
       keyFacts: [],
       sources: [],
-      usage,
+      usage: {
+        ...buildFallbackUsage(model, durationMs),
+        ...(result.usage ? {
+          inputTokens: result.usage.inputTokens,
+          cachedInputTokens: result.usage.cachedInputTokens ?? 0,
+          outputTokens: result.usage.outputTokens,
+          reasoningTokens: result.usage.reasoningTokens ?? 0,
+          textCost: result.usage.estimatedCost,
+          webSearchCalls: result.usage.webSearchCalls ?? 0,
+          webSearchCost: result.usage.webSearchCost ?? calculateWebSearchCost(result.usage.webSearchCalls ?? 0),
+          totalCost: result.usage.estimatedCost + (result.usage.webSearchCost ?? calculateWebSearchCost(result.usage.webSearchCalls ?? 0)),
+          toolCalls: result.usage.toolCalls ?? 0,
+          durationMs: result.usage.durationMs ?? durationMs,
+        } : {}),
+      },
     }
   }
 
-  // Mark sources as verified=true since they came from a real web search
-  const sources = (result.data.sources ?? []).map(s => ({
-    ...s,
-    url: s.url ?? '',
-    verified: true, // real web search ran
-  }))
+  const data = result.data as {
+    summary: ResearchSummary
+    sources?: ResearchSource[]
+  }
+
+  const sources = dedupeSources(data.sources ?? [])
+  const webSearchCalls = result.usage.webSearchCalls ?? 0
+  const webSearchCost = result.usage.webSearchCost ?? calculateWebSearchCost(webSearchCalls)
+  const textCost = result.usage.estimatedCost
 
   return {
-    summary: result.data.summary,
-    keyFacts: result.data.keyFacts ?? [],
+    summary: data.summary.summary,
+    keyFacts: data.summary.keyFacts ?? [],
     sources,
-    usage,
+    usage: {
+      model,
+      inputTokens: result.usage.inputTokens,
+      cachedInputTokens: result.usage.cachedInputTokens ?? 0,
+      outputTokens: result.usage.outputTokens,
+      reasoningTokens: result.usage.reasoningTokens ?? 0,
+      webSearchCalls,
+      textCost,
+      webSearchCost,
+      totalCost: textCost + webSearchCost,
+      durationMs: result.usage.durationMs ?? durationMs,
+      toolCalls: result.usage.toolCalls ?? 0,
+    },
   }
 }
 
-/**
- * Determine if a topic needs web research before content generation.
- */
 export function shouldResearchTopic(topic: string, contentPillar?: string): boolean {
-  const researchPillars = ['تاریخ', 'علم', 'تاریخ ایران', 'تهران قدیم', 'شخصیت‌های تاریخی']
+  const researchPillars = ['تاریخ', 'علم', 'تاریخ ایران', 'تهران قدیم', 'شخصیت‌های تاریخی', 'زندگینامه']
   if (contentPillar && researchPillars.some(p => contentPillar.includes(p))) return true
 
-  const researchKeywords = ['تاریخ', 'علم', 'کشف', 'اختراع', 'جنگ', 'انقلاب', 'شخصیت', 'دوره', 'قرن', 'میلادی', 'هجری']
+  const researchKeywords = [
+    'تاریخ', 'علم', 'کشف', 'اختراع', 'جنگ', 'انقلاب', 'شخصیت', 'دوره', 'قرن', 'میلادی', 'هجری',
+    'آمار', 'درصد', 'جمعیت', 'زندگی‌نامه', 'بیوگرافی', 'رویداد', 'سال', 'تاریخچه',
+  ]
+
   return researchKeywords.some(kw => topic.includes(kw))
 }

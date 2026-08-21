@@ -8,7 +8,8 @@ import { buildTopicGeneratorPrompt } from '@/lib/prompts/topicGenerator'
 import { buildPostWriterPrompt } from '@/lib/prompts/postWriter'
 import { buildEditorialReviewPrompt } from '@/lib/prompts/editorialReview'
 import { GeneratedPostSchema, QualityReviewSchema } from './schemas'
-import { researchTopic, shouldResearchTopic, ResearchResult } from '@/services/research'
+import { researchTopic, shouldResearchTopic } from '@/services/research'
+import type { ResearchResultData } from '@/services/ai/types'
 import { getModelForOperation } from './modelConfig'
 import { POST_WRITER_PROMPT } from '@/lib/prompts/postWriter'
 import { TOPIC_GENERATOR_PROMPT } from '@/lib/prompts/topicGenerator'
@@ -102,7 +103,7 @@ export async function generateDailyPost(
   const generationSessionId = generateId()
   let totalCost = 0
   let usedResearch = false
-  let researchData: ResearchResult | undefined
+  let researchData: ResearchResultData | undefined
 
   // ── Step 1: Load Content Brain ──────────────────────────────────────────────
   const [profile, pillars, recentMemory] = await Promise.all([
@@ -302,16 +303,27 @@ export async function generateDailyPost(
     slideNumber: i + 1,
   }))
 
-  // Sources: mark verified only if they came from real research
-  const sourcesWithIds = (generatedPost.sources ?? []).map(s => ({
+  const researchSources = (researchData?.sources ?? []).map(source => ({
+    id: source.id || generateId(),
+    title: source.title,
+    url: source.url ?? '',
+    publisher: source.publisher ?? '',
+    date: source.publishedAt ?? '',
+    verified: source.verificationStatus,
+    verificationStatus: source.verificationStatus,
+  }))
+
+  const generatedSources = (generatedPost.sources ?? []).map(s => ({
     ...s,
     id: s.id || generateId(),
     url: s.url ?? '',
     publisher: s.publisher ?? '',
     date: s.date ?? '',
-    verified: 'unverified' as const, // AI-generated sources are always unverified
+    verified: 'unverified' as const,
     verificationStatus: 'unverified' as const,
   }))
+
+  const sourcesWithIds = researchSources.length > 0 ? [...researchSources, ...generatedSources] : generatedSources
 
   const researchCost = researchData?.usage.totalCost ?? 0
 

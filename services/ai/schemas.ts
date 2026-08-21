@@ -103,12 +103,16 @@ export const ResearchResultSchema = z.object({
   keyFacts: z.array(z.object({
     claim: z.string(),
     confidence: z.enum(['high', 'medium', 'low']),
+    sourceIds: z.array(z.string()).optional(),
   })).default([]),
   sources: z.array(z.object({
+    id: z.string(),
     title: z.string(),
-    url: z.string().default(''),
+    url: z.string().optional(),
     publisher: z.string().optional(),
     publishedAt: z.string().optional(),
+    provenance: z.enum(['openai_web_search', 'model_generated', 'manual']),
+    verificationStatus: z.enum(['verified', 'unverified', 'questionable']),
   })).default([]),
 })
 

@@ -82,6 +82,55 @@ export interface AIUsageMetadata {
   imageGenerationCount?: number
   imageCost?: number
   durationMs?: number
+  toolCalls?: number
+}
+
+export type ResearchSourceProvenance = 'openai_web_search' | 'model_generated' | 'manual'
+export type ResearchSourceVerificationStatus = 'verified' | 'unverified' | 'questionable'
+
+export interface ResearchSource {
+  id: string
+  title: string
+  url?: string
+  publisher?: string
+  publishedAt?: string
+  provenance: ResearchSourceProvenance
+  verificationStatus: ResearchSourceVerificationStatus
+}
+
+export interface ResearchFact {
+  claim: string
+  confidence: 'high' | 'medium' | 'low'
+  sourceIds?: string[]
+}
+
+export interface ResearchUsageDetails {
+  model: string
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningTokens?: number
+  webSearchCalls: number
+  textCost: number
+  webSearchCost: number
+  totalCost: number
+  durationMs: number
+  toolCalls?: number
+}
+
+export interface ResearchResultData {
+  summary: string
+  keyFacts: ResearchFact[]
+  sources: ResearchSource[]
+  usage: ResearchUsageDetails
+}
+
+export interface GeneratedImageResult {
+  assetType: 'url' | 'base64'
+  data: string
+  mimeType: string
+  model: string
+  size?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +167,7 @@ export interface AIGenerationResult<T = unknown> {
 export interface AIProviderInterface {
   generateText(request: AIGenerationRequest): Promise<AIGenerationResult<string>>
   generateStructured<T>(request: StructuredGenerationRequest<T>): Promise<AIGenerationResult<T>>
-  generateImage?(prompt: string, size?: string): Promise<AIGenerationResult<string>>
+  generateImage?(prompt: string, size?: string): Promise<AIGenerationResult<GeneratedImageResult>>
+  researchWithWebSearch?(request: StructuredGenerationRequest<unknown>): Promise<AIGenerationResult<unknown>>
   getAvailableModels(): AIModelConfig[]
 }
