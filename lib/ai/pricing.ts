@@ -40,28 +40,48 @@ const FALLBACK_CACHED_INPUT_PER_MILLION = parseFloat(
 )
 
 export const TEXT_MODEL_PRICING: Record<string, TextPricing> = {
-  'gpt-4o-mini': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_INPUT ?? '0.15'),
-    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_CACHED ?? '0.075'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_OUTPUT ?? '0.6'),
+  // Primary models
+  'gpt-5.6-luna': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_INPUT ?? '1.00'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_CACHED ?? '0.02'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_OUTPUT ?? '6.00'),
     metadata: VERIFIED_PRICING_METADATA,
   },
-  'gpt-4.1-mini': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_INPUT ?? '0.40'),
-    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_CACHED ?? '0.10'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_OUTPUT ?? '1.60'),
+  'gpt-5.6-terra': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_INPUT ?? '2.50'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_CACHED ?? '0.20'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_OUTPUT ?? '15.00'),
     metadata: VERIFIED_PRICING_METADATA,
   },
+  'gpt-5.6-sol': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT56_SOL_INPUT ?? '5.00'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_SOL_CACHED ?? '0.50'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT56_SOL_OUTPUT ?? '30.00'),
+    metadata: VERIFIED_PRICING_METADATA,
+  },
+  // Fallback models (available if overridden via env vars)
   'gpt-4o': {
     inputPerMillion: parseFloat(process.env.PRICE_GPT4O_INPUT ?? '2.50'),
     cachedInputPerMillion: parseFloat(process.env.PRICE_GPT4O_CACHED ?? '1.25'),
     outputPerMillion: parseFloat(process.env.PRICE_GPT4O_OUTPUT ?? '10.00'),
     metadata: VERIFIED_PRICING_METADATA,
   },
+  'gpt-4o-mini': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_INPUT ?? '0.15'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_CACHED ?? '0.075'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_OUTPUT ?? '0.6'),
+    metadata: VERIFIED_PRICING_METADATA,
+  },
   'gpt-4.1': {
     inputPerMillion: parseFloat(process.env.PRICE_GPT41_INPUT ?? '2.00'),
     cachedInputPerMillion: parseFloat(process.env.PRICE_GPT41_CACHED ?? '0.50'),
     outputPerMillion: parseFloat(process.env.PRICE_GPT41_OUTPUT ?? '8.00'),
+    metadata: VERIFIED_PRICING_METADATA,
+  },
+  'gpt-4.1-mini': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_INPUT ?? '0.40'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_CACHED ?? '0.10'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_OUTPUT ?? '1.60'),
     metadata: VERIFIED_PRICING_METADATA,
   },
   'gpt-5': {

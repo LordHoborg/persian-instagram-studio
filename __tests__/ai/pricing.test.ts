@@ -8,22 +8,22 @@ describe('calculateTextCost', () => {
     expect(cost).toBeCloseTo(pricing.inputPerMillion + pricing.outputPerMillion, 5)
   })
 
-  it('calculates gpt-4.1 cost correctly', () => {
-    const pricing = TEXT_MODEL_PRICING['gpt-4.1']
-    const cost = calculateTextCost('gpt-4.1', 1_000_000, 1_000_000)
+  it('calculates gpt-5.6-terra cost correctly', () => {
+    const pricing = TEXT_MODEL_PRICING['gpt-5.6-terra']
+    const cost = calculateTextCost('gpt-5.6-terra', 1_000_000, 1_000_000)
     expect(cost).toBeCloseTo(pricing.inputPerMillion + pricing.outputPerMillion, 5)
   })
 
-  it('calculates gpt-5 cost correctly', () => {
-    const pricing = TEXT_MODEL_PRICING['gpt-5']
-    const cost = calculateTextCost('gpt-5', 1_000_000, 1_000_000)
+  it('calculates gpt-5.6-sol cost correctly', () => {
+    const pricing = TEXT_MODEL_PRICING['gpt-5.6-sol']
+    const cost = calculateTextCost('gpt-5.6-sol', 1_000_000, 1_000_000)
     expect(cost).toBeCloseTo(pricing.inputPerMillion + pricing.outputPerMillion, 5)
   })
 
   it('handles cached input tokens', () => {
-    const pricing = TEXT_MODEL_PRICING['gpt-4.1']
+    const pricing = TEXT_MODEL_PRICING['gpt-5.6-terra']
     const cachedRate = pricing.cachedInputPerMillion ?? pricing.inputPerMillion * 0.5
-    const cost = calculateTextCost('gpt-4.1', 1_000_000, 0, 1_000_000)
+    const cost = calculateTextCost('gpt-5.6-terra', 1_000_000, 0, 1_000_000)
     expect(cost).toBeCloseTo(cachedRate, 5)
   })
 
