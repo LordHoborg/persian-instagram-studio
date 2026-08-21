@@ -40,43 +40,53 @@ const FALLBACK_CACHED_INPUT_PER_MILLION = parseFloat(
 )
 
 export const TEXT_MODEL_PRICING: Record<string, TextPricing> = {
-  'gpt-5.6-luna': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_INPUT ?? '0.5'),
-    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_CACHED ?? '0.05'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT56_LUNA_OUTPUT ?? '3'),
+  'gpt-4o-mini': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_INPUT ?? '0.15'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_CACHED ?? '0.075'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT4O_MINI_OUTPUT ?? '0.6'),
     metadata: VERIFIED_PRICING_METADATA,
   },
-  'gpt-5.6-terra': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_INPUT ?? '1.25'),
-    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_CACHED ?? '0.125'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT56_TERRA_OUTPUT ?? '7.5'),
-    metadata: VERIFIED_PRICING_METADATA,
-  },
-  'gpt-5.6-sol': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT56_SOL_INPUT ?? '2.5'),
-    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT56_SOL_CACHED ?? '0.25'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT56_SOL_OUTPUT ?? '15'),
+  'gpt-4.1-mini': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_INPUT ?? '0.40'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_CACHED ?? '0.10'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT41_MINI_OUTPUT ?? '1.60'),
     metadata: VERIFIED_PRICING_METADATA,
   },
   'gpt-4o': {
-    inputPerMillion: 5,
-    cachedInputPerMillion: 2.5,
-    outputPerMillion: 15,
+    inputPerMillion: parseFloat(process.env.PRICE_GPT4O_INPUT ?? '2.50'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT4O_CACHED ?? '1.25'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT4O_OUTPUT ?? '10.00'),
     metadata: VERIFIED_PRICING_METADATA,
   },
-  'gpt-4o-mini': {
-    inputPerMillion: 0.15,
-    cachedInputPerMillion: 0.075,
-    outputPerMillion: 0.6,
+  'gpt-4.1': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT41_INPUT ?? '2.00'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT41_CACHED ?? '0.50'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT41_OUTPUT ?? '8.00'),
+    metadata: VERIFIED_PRICING_METADATA,
+  },
+  'gpt-5': {
+    inputPerMillion: parseFloat(process.env.PRICE_GPT5_INPUT ?? '1.25'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT5_CACHED ?? '0.125'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT5_OUTPUT ?? '10.00'),
     metadata: VERIFIED_PRICING_METADATA,
   },
 }
 
-export const IMAGE_MODEL_PRICING: Record<string, ImagePricing> = {
+export interface ImagePricingExtended extends ImagePricing {
+  textInputPerMillion?: number
+  cachedTextInputPerMillion?: number
+}
+
+export const IMAGE_MODEL_PRICING: Record<string, ImagePricingExtended> = {
+  // gpt-image-2 pricing (image tokens):
+  //   image input: $8.00/1M, cached image input: $2.00/1M, image output: $30.00/1M
+  //   text input: $5.00/1M, cached text input: $1.25/1M
   'gpt-image-2': {
-    inputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_INPUT ?? '4'),
-    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_CACHED ?? '1'),
-    outputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_OUTPUT ?? '15'),
+    inputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_INPUT ?? '8'),
+    cachedInputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_CACHED ?? '2'),
+    outputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_OUTPUT ?? '30'),
+    textInputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_TEXT_INPUT ?? '5'),
+    cachedTextInputPerMillion: parseFloat(process.env.PRICE_GPT_IMAGE_2_TEXT_CACHED ?? '1.25'),
     metadata: VERIFIED_PRICING_METADATA,
   },
 }
@@ -130,10 +140,12 @@ export function calculateImageCost(model: string, count: number, options: ImageC
     )
   }
 
+  // Estimated output token counts per image size for gpt-image-2.
+  // These are approximations; actual token counts vary by quality setting.
   const defaultOutputTokensBySize: Record<string, number> = {
     '1024x1024': 2667,
-    '1024x1792': 4667,
-    '1792x1024': 4667,
+    '1024x1536': 4667,
+    '1536x1024': 4667,
   }
 
   const estimatedOutputTokens = defaultOutputTokensBySize[options.size ?? '1024x1024'] ?? defaultOutputTokensBySize['1024x1024']

@@ -4,11 +4,11 @@
 
 export const MODEL_CONFIG = {
   /** Low-cost routine tasks: topic gen, classification, hashtags, formatting */
-  cheap: process.env.OPENAI_MODEL_CHEAP ?? 'gpt-5.6-luna',
+  cheap: process.env.OPENAI_MODEL_CHEAP ?? 'gpt-4o-mini',
   /** Main content generation: full Persian posts, carousel writing, captions */
-  standard: process.env.OPENAI_MODEL_STANDARD ?? 'gpt-5.6-terra',
+  standard: process.env.OPENAI_MODEL_STANDARD ?? 'gpt-4.1',
   /** High-value review: complex reasoning, fact review, editorial */
-  premium: process.env.OPENAI_MODEL_PREMIUM ?? 'gpt-5.6-sol',
+  premium: process.env.OPENAI_MODEL_PREMIUM ?? 'gpt-5',
   /** Image generation */
   image: process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2',
 } as const

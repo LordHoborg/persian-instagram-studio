@@ -91,6 +91,7 @@ function parseStructuredOutput<T>(rawText: string, request: StructuredGeneration
 }
 
 type AnnotationLike = {
+  type?: string
   url?: string
   title?: string
   publisher?: string
@@ -120,6 +121,8 @@ function extractWebSearchSources(response: OpenAI.Responses.Response): ResearchS
   const seen = new Set<string>()
 
   for (const annotation of annotations) {
+    // Only process url_citation annotations from the Responses API
+    if (annotation.type !== 'url_citation') continue
     const url = typeof annotation.url === 'string' ? annotation.url.trim() : ''
     if (!url || seen.has(url)) continue
     seen.add(url)
@@ -261,7 +264,7 @@ export class OpenAIProvider implements AIProviderInterface {
             content: request.prompt,
           },
         ],
-        tools: [{ type: 'web_search' }],
+        tools: [{ type: 'web_search_preview' }],
         text: {
           format: {
             type: 'json_schema',
@@ -322,7 +325,7 @@ export class OpenAIProvider implements AIProviderInterface {
         model,
         prompt,
         n: 1,
-        size: size as '1024x1024' | '1792x1024' | '1024x1792',
+        size: size as '1024x1024' | '1536x1024' | '1024x1536' | 'auto',
       })
 
       const imageData = response.data?.[0]

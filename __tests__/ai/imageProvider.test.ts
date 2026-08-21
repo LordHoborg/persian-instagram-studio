@@ -29,7 +29,7 @@ describe('image result handling', () => {
 
   it('uses size-aware image cost path', () => {
     const square = calculateImageCost('gpt-image-2', 1, { size: '1024x1024' })
-    const portrait = calculateImageCost('gpt-image-2', 1, { size: '1024x1792' })
+    const portrait = calculateImageCost('gpt-image-2', 1, { size: '1024x1536' })
 
     expect(square).toBeGreaterThan(0)
     expect(portrait).toBeGreaterThan(square)
