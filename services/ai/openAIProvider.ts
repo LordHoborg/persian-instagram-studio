@@ -153,6 +153,55 @@ function countWebSearchCalls(response: OpenAI.Responses.Response): number {
   return (response.output ?? []).filter(item => item.type === 'web_search_call').length
 }
 
+/**
+ * Sanitize a JSON Schema (draft-07) object for use with OpenAI Structured Outputs (strict mode).
+ *
+ * OpenAI strict mode requires:
+ * - All object properties must be listed in `required`
+ * - No `additionalProperties: true`
+ * - No `$schema` key
+ * - No draft-07 numeric `exclusiveMinimum` (convert to `minimum`)
+ * - No `default` keys
+ *
+ * This function applies all fixes recursively.
+ */
+function sanitizeSchemaForOpenAI(schema: unknown): unknown {
+  if (schema === null || typeof schema !== 'object') return schema
+  if (Array.isArray(schema)) return schema.map(sanitizeSchemaForOpenAI)
+
+  const obj = schema as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === '$schema') continue
+    if (key === 'default') continue
+    if (key === 'additionalProperties' && value === true) continue
+    if (key === 'exclusiveMinimum' && typeof value === 'number') {
+      result['minimum'] = Number.isInteger(value) ? value + 1 : value
+      continue
+    }
+    result[key] = sanitizeSchemaForOpenAI(value)
+  }
+
+  // OpenAI strict mode: if this is an object schema with properties,
+  // all property keys must appear in `required`
+  if (
+    result['type'] === 'object' &&
+    result['properties'] &&
+    typeof result['properties'] === 'object' &&
+    !Array.isArray(result['properties'])
+  ) {
+    const allKeys = Object.keys(result['properties'] as Record<string, unknown>)
+    result['required'] = allKeys
+    // strict mode also requires additionalProperties: false
+    if (!('additionalProperties' in result)) {
+      result['additionalProperties'] = false
+    }
+  }
+
+  return result
+}
+
 export class OpenAIProvider implements AIProviderInterface {
   getAvailableModels(): AIModelConfig[] {
     return AVAILABLE_MODELS
@@ -168,7 +217,6 @@ export class OpenAIProvider implements AIProviderInterface {
         model,
         input: request.prompt,
         max_output_tokens: request.maxTokens ?? 2000,
-        temperature: request.temperature ?? 0.7,
       })
 
       const text = response.output_text ?? ''
@@ -192,7 +240,8 @@ export class OpenAIProvider implements AIProviderInterface {
 
     try {
       const client = getClient()
-      const jsonSchema = zodToJsonSchema(request.schema, { target: 'openAi' })
+      const rawSchema = zodToJsonSchema(request.schema, { target: 'jsonSchema7' })
+      const jsonSchema = sanitizeSchemaForOpenAI(rawSchema)
 
       const response = await client.responses.create({
         model,
@@ -216,7 +265,6 @@ export class OpenAIProvider implements AIProviderInterface {
           },
         },
         max_output_tokens: request.maxTokens ?? 4000,
-        temperature: request.temperature ?? 0.7,
       })
 
       const rawText = response.output_text ?? '{}'
@@ -249,7 +297,8 @@ export class OpenAIProvider implements AIProviderInterface {
 
     try {
       const client = getClient()
-      const jsonSchema = zodToJsonSchema(request.schema, { target: 'openAi' })
+      const rawSchema = zodToJsonSchema(request.schema, { target: 'jsonSchema7' })
+      const jsonSchema = sanitizeSchemaForOpenAI(rawSchema)
 
       const response = await client.responses.create({
         model,
@@ -274,7 +323,6 @@ export class OpenAIProvider implements AIProviderInterface {
           },
         },
         max_output_tokens: request.maxTokens ?? 4000,
-        temperature: request.temperature ?? 0.2,
       })
 
       const rawText = response.output_text ?? '{}'
