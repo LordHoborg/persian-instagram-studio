@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {},
-  serverExternalPackages: ['better-sqlite3', '@resvg/resvg-js'],
+  serverExternalPackages: ['better-sqlite3', 'playwright'],
 }
 
 module.exports = nextConfig

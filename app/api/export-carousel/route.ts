@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPostById } from '@/lib/db'
-import { exportCarousel } from '@/lib/carousel/export'
+import { exportCarouselWithBrowser } from '@/lib/carousel/export-browser'
 import { CarouselTemplateId } from '@/components/carousel/carouselMeta'
 
 const ALLOWED_TEMPLATES: CarouselTemplateId[] = ['editorial', 'historical', 'minimal', 'modern', 'magazine']
@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'پست یافت نشد' }, { status: 404 })
     }
 
-    const result = await exportCarousel(post, resolvedTemplate)
+    const origin = req.nextUrl.origin
+    const result = await exportCarouselWithBrowser(post, resolvedTemplate, origin)
     return NextResponse.json(result)
   } catch (error) {
     console.error('[export-carousel]', error)
