@@ -26,6 +26,8 @@ import {
   FileText,
   LayoutTemplate,
   ScanSearch,
+  Download,
+  Images,
 } from 'lucide-react'
 
 function toPersianNum(n: number): string {
@@ -105,6 +107,11 @@ export default function PostDetailPage() {
   const [rewriteError, setRewriteError] = useState('')
   const [hookLoading, setHookLoading] = useState(false)
   const [hookError, setHookError] = useState('')
+  const [exportLoading, setExportLoading] = useState(false)
+  const [exportError, setExportError] = useState('')
+  const [exportedSlides, setExportedSlides] = useState<Array<{ fileName: string; dataUrl: string; slideNumber: number; type: PostSlide['type'] }>>([])
+  const [exportZipName, setExportZipName] = useState('')
+  const [exportZipBase64, setExportZipBase64] = useState('')
 
   useEffect(() => {
     const load = async () => {
@@ -182,11 +189,54 @@ export default function PostDetailPage() {
       if (!res.ok) throw new Error((await res.json()).error ?? 'خطا در بهبود Hook')
       const data = await res.json()
       setPost({ ...post, hook: data.hook })
-    } catch (err: any) {
-      setHookError(err.message ?? 'خطا در بهبود Hook')
+    } catch (err: unknown) {
+      setHookError(err instanceof Error ? err.message : 'خطا در بهبود Hook')
     } finally {
       setHookLoading(false)
     }
+  }
+
+  const handleExportCarousel = async () => {
+    if (!post) return
+    setExportLoading(true)
+    setExportError('')
+    setExportedSlides([])
+    setExportZipBase64('')
+    setExportZipName('')
+
+    try {
+      const res = await fetch('/api/export-carousel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId: post.id, template: activeTemplate }),
+      })
+
+      if (!res.ok) throw new Error((await res.json()).error ?? 'خطا در خروجی گرفتن')
+
+      const data = await res.json()
+      setExportedSlides(data.slides ?? [])
+      setExportZipBase64(data.zipBase64 ?? '')
+      setExportZipName(data.zipFileName ?? `${post.id}-carousel-export.zip`)
+    } catch (err: unknown) {
+      setExportError(err instanceof Error ? err.message : 'خطا در خروجی گرفتن از کاروسل')
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
+  const handleDownloadZip = () => {
+    if (!exportZipBase64 || !exportZipName) return
+    const link = document.createElement('a')
+    link.href = `data:application/zip;base64,${exportZipBase64}`
+    link.download = exportZipName
+    link.click()
+  }
+
+  const handleDownloadSlide = (fileName: string, dataUrl: string) => {
+    const link = document.createElement('a')
+    link.href = dataUrl
+    link.download = fileName
+    link.click()
   }
 
   const verifiedSources = useMemo(
@@ -356,6 +406,10 @@ export default function PostDetailPage() {
           </Card>
 
           <div className="flex gap-2 flex-wrap">
+            <Button onClick={handleExportCarousel} className="gap-2" disabled={exportLoading}>
+              {exportLoading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              {exportLoading ? 'در حال خروجی گرفتن...' : 'Export Carousel'}
+            </Button>
             {post.status === 'generated' && (
               <Button onClick={handleApprove} className="gap-2">
                 <Check size={16} /> تأیید
@@ -371,6 +425,56 @@ export default function PostDetailPage() {
               {editMode ? 'پایان ویرایش' : 'ویرایش'}
             </Button>
           </div>
+
+          {(exportLoading || exportError || exportedSlides.length > 0) && (
+            <Card>
+              <CardHeader><CardTitle>خروجی کاروسل</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                {exportLoading && (
+                  <div className="rounded-xl border border-primary-200 bg-primary-50 dark:border-primary-900 dark:bg-primary-950/20 p-4">
+                    <div className="flex items-center gap-2 text-primary-700 dark:text-primary-300 mb-2">
+                      <Loader2 size={16} className="animate-spin" />
+                      <span className="font-medium">در حال رندر اسلایدها در ابعاد ۱۰۸۰×۱۳۵۰</span>
+                    </div>
+                    <p className="text-sm text-primary-700/80 dark:text-primary-300/80">بسته به تعداد اسلایدها چند لحظه زمان می‌برد.</p>
+                  </div>
+                )}
+
+                {exportError && <p className="text-sm text-red-500">{exportError}</p>}
+
+                {exportedSlides.length > 0 && (
+                  <>
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-semibold text-surface-900 dark:text-white">پیش‌نمایش خروجی</p>
+                        <p className="text-xs text-surface-500 mt-1">PNG با ابعاد ثابت ۱۰۸۰×۱۳۵۰ برای هر اسلاید</p>
+                      </div>
+                      <Button variant="outline" onClick={handleDownloadZip} className="gap-2">
+                        <Images size={16} /> دانلود ZIP
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {exportedSlides.map(slide => (
+                        <div key={slide.fileName} className="rounded-2xl border border-surface-200 dark:border-surface-800 p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-surface-900 dark:text-white">{slide.fileName}</p>
+                              <p className="text-xs text-surface-500 mt-1">{getSlideTypeLabel(slide.type)}</p>
+                            </div>
+                            <Button size="sm" variant="outline" onClick={() => handleDownloadSlide(slide.fileName, slide.dataUrl)} className="gap-1.5">
+                              <Download size={14} /> PNG
+                            </Button>
+                          </div>
+                          <img src={slide.dataUrl} alt={slide.fileName} className="w-full rounded-xl border border-surface-200 dark:border-surface-700" />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-4">
