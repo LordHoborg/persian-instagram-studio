@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { getPostById, updatePost } from '@/lib/db'
 import { PostPackage, PostSlide } from '@/types'
@@ -10,25 +10,124 @@ import { Badge } from '@/components/ui/Badge'
 import { Textarea } from '@/components/ui/Textarea'
 import { Input } from '@/components/ui/Input'
 import { CarouselRenderer } from '@/components/carousel/CarouselRenderer'
-import { getStatusLabel, getStatusColor, getContentTypeLabel } from '@/lib/utils'
-import { ArrowLeft, Check, Calendar, RotateCcw, ChevronRight, ChevronLeft } from 'lucide-react'
+import { CAROUSEL_TEMPLATES, CarouselTemplateId } from '@/components/carousel/carouselMeta'
+import { getStatusLabel, getStatusColor, getContentTypeLabel, cn } from '@/lib/utils'
+import {
+  Check,
+  Calendar,
+  ChevronRight,
+  ChevronLeft,
+  Sparkles,
+  Loader2,
+  Edit3,
+  ExternalLink,
+  ShieldCheck,
+  AlertTriangle,
+  FileText,
+  LayoutTemplate,
+  ScanSearch,
+} from 'lucide-react'
+
+function toPersianNum(n: number): string {
+  return n.toString().replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d])
+}
+
+function getSlideTypeLabel(type: PostSlide['type']) {
+  switch (type) {
+    case 'cover':
+      return 'کاور'
+    case 'content':
+      return 'محتوایی'
+    case 'quote':
+      return 'نقل‌قول'
+    case 'cta':
+      return 'پایانی'
+    case 'source':
+      return 'منبع'
+    default:
+      return 'اسلاید'
+  }
+}
+
+function getVerificationMeta(status: string) {
+  switch (status) {
+    case 'verified':
+      return {
+        label: 'تأییدشده',
+        className: 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900',
+        icon: ShieldCheck,
+      }
+    case 'questionable':
+      return {
+        label: 'نیازمند بررسی',
+        className: 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900',
+        icon: AlertTriangle,
+      }
+    default:
+      return {
+        label: 'تأییدنشده',
+        className: 'bg-surface-100 text-surface-600 border border-surface-200 dark:bg-surface-800 dark:text-surface-300 dark:border-surface-700',
+        icon: FileText,
+      }
+  }
+}
+
+const SLIDE_TYPE_ICONS: Record<PostSlide['type'], string> = {
+  cover: '🎯',
+  content: '📝',
+  quote: '❝',
+  cta: '📣',
+  source: '🔗',
+}
+
+const QUALITY_SCORE_LABELS: Record<string, string> = {
+  hook: 'Hook',
+  clarity: 'وضوح',
+  originality: 'اصالت',
+  persianNaturalness: 'روانی فارسی',
+  factualConfidence: 'اعتماد به facts',
+  visualConsistency: 'هماهنگی بصری',
+}
 
 export default function PostDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const stripRef = useRef<HTMLDivElement>(null)
+
   const [post, setPost] = useState<PostPackage | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeSlide, setActiveSlide] = useState(0)
   const [editMode, setEditMode] = useState(false)
+  const [activeTemplate, setActiveTemplate] = useState<CarouselTemplateId>('modern')
+  const [rewriteInstruction, setRewriteInstruction] = useState('')
+  const [rewriteOpen, setRewriteOpen] = useState(false)
+  const [rewriteLoading, setRewriteLoading] = useState(false)
+  const [rewriteError, setRewriteError] = useState('')
+  const [hookLoading, setHookLoading] = useState(false)
+  const [hookError, setHookError] = useState('')
 
   useEffect(() => {
     const load = async () => {
       const p = await getPostById(params.id as string)
-      if (p) setPost(p)
+      if (p) {
+        setPost(p)
+        const knownTemplates = CAROUSEL_TEMPLATES.map(template => template.id)
+        setActiveTemplate(
+          knownTemplates.includes(p.imageStyle as CarouselTemplateId)
+            ? (p.imageStyle as CarouselTemplateId)
+            : 'modern'
+        )
+      }
       setLoading(false)
     }
     load()
   }, [params.id])
+
+  useEffect(() => {
+    if (!stripRef.current) return
+    const thumb = stripRef.current.children[activeSlide] as HTMLElement | undefined
+    thumb?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [activeSlide])
 
   const handleUpdate = async (updates: Partial<PostPackage>) => {
     if (!post) return
@@ -46,45 +145,211 @@ export default function PostDetailPage() {
   const handleApprove = () => handleUpdate({ status: 'approved' })
   const handleSchedule = () => handleUpdate({ status: 'scheduled', scheduledAt: new Date(Date.now() + 86400000).toISOString() })
 
-  if (loading) return <div className="text-center py-20 text-surface-500">در حال بارگذاری...</div>
+  const handleRewriteSlide = async () => {
+    if (!post || !rewriteInstruction.trim()) return
+    setRewriteLoading(true)
+    setRewriteError('')
+    try {
+      const res = await fetch('/api/rewrite-slide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId: post.id, slideIndex: activeSlide, instruction: rewriteInstruction }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error ?? 'خطا در بازنویسی')
+      const data = await res.json()
+      const newSlides = [...post.slides]
+      newSlides[activeSlide] = data.slide
+      setPost({ ...post, slides: newSlides })
+      setRewriteInstruction('')
+      setRewriteOpen(false)
+    } catch (err: any) {
+      setRewriteError(err.message ?? 'خطا در بازنویسی اسلاید')
+    } finally {
+      setRewriteLoading(false)
+    }
+  }
+
+  const handleImproveHook = async () => {
+    if (!post) return
+    setHookLoading(true)
+    setHookError('')
+    try {
+      const res = await fetch('/api/improve-hook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId: post.id, currentHook: post.hook, topic: post.topic }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error ?? 'خطا در بهبود Hook')
+      const data = await res.json()
+      setPost({ ...post, hook: data.hook })
+    } catch (err: any) {
+      setHookError(err.message ?? 'خطا در بهبود Hook')
+    } finally {
+      setHookLoading(false)
+    }
+  }
+
+  const verifiedSources = useMemo(
+    () => post?.sources.filter(source => source.verificationStatus === 'verified') ?? [],
+    [post]
+  )
+  const unverifiedSources = useMemo(
+    () => post?.sources.filter(source => source.verificationStatus !== 'verified') ?? [],
+    [post]
+  )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-32 text-surface-500">
+        <Loader2 className="animate-spin ml-2" size={20} />
+        در حال بارگذاری...
+      </div>
+    )
+  }
+
   if (!post) return <div className="text-center py-20 text-surface-500">پست یافت نشد</div>
 
+  const currentSlide = post.slides[activeSlide]
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <button onClick={() => router.back()} className="flex items-center gap-2 text-surface-500 hover:text-surface-800">
-          <ArrowLeft size={18} />
+    <div className="max-w-7xl mx-auto space-y-6 pb-12" dir="rtl">
+      <div className="flex items-center justify-between gap-4">
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-2 text-surface-500 hover:text-surface-800 dark:hover:text-surface-200 transition-colors"
+        >
+          <ArrowRight size={18} />
           بازگشت
         </button>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap justify-end">
           <Badge className={getStatusColor(post.status)}>{getStatusLabel(post.status)}</Badge>
           <Badge variant="info">{getContentTypeLabel(post.contentType)}</Badge>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] gap-6 items-start">
+        <div className="space-y-4 lg:sticky lg:top-6">
           <Card className="overflow-hidden">
-            <CardContent className="p-4">
-              <div className="relative">
-                <CarouselRenderer slide={post.slides[activeSlide]} template={post.imageStyle} />
+            <CardContent className="p-4 sm:p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-surface-500 mb-1">پیش‌نمایش واقعی اسلاید</p>
+                  <h1 className="text-lg font-bold text-surface-900 dark:text-white leading-relaxed">{post.title}</h1>
+                </div>
+                <div className="text-left">
+                  <p className="text-xs text-surface-500">اسلاید فعال</p>
+                  <p className="text-sm font-semibold text-surface-900 dark:text-white">
+                    {toPersianNum(activeSlide + 1)} از {toPersianNum(post.slides.length)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="relative mx-auto w-full max-w-[430px]">
+                <CarouselRenderer
+                  slide={currentSlide}
+                  template={activeTemplate}
+                  slideCount={post.slides.length}
+                  context={{
+                    post: {
+                      title: post.title,
+                      topic: post.topic,
+                      cta: post.cta,
+                      imageStyle: post.imageStyle,
+                    },
+                    sourceMeta: {
+                      verifiedCount: verifiedSources.length,
+                    },
+                    themeMeta: {
+                      label: CAROUSEL_TEMPLATES.find(template => template.id === activeTemplate)?.label,
+                    },
+                  }}
+                />
+
                 {post.slides.length > 1 && (
                   <>
-                    <button onClick={() => setActiveSlide(Math.max(0, activeSlide - 1))}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 dark:bg-black/70 flex items-center justify-center shadow">
-                      <ChevronLeft size={16} />
+                    <button
+                      onClick={() => setActiveSlide(i => Math.max(0, i - 1))}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 dark:bg-black/70 flex items-center justify-center shadow-lg hover:scale-105 transition-transform"
+                      aria-label="اسلاید قبلی"
+                    >
+                      <ChevronLeft size={18} />
                     </button>
-                    <button onClick={() => setActiveSlide(Math.min(post.slides.length - 1, activeSlide + 1))}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/90 dark:bg-black/70 flex items-center justify-center shadow">
-                      <ChevronRight size={16} />
+                    <button
+                      onClick={() => setActiveSlide(i => Math.min(post.slides.length - 1, i + 1))}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 dark:bg-black/70 flex items-center justify-center shadow-lg hover:scale-105 transition-transform"
+                      aria-label="اسلاید بعدی"
+                    >
+                      <ChevronRight size={18} />
                     </button>
                   </>
                 )}
               </div>
-              <div className="flex justify-center gap-1.5 mt-3">
-                {post.slides.map((_, i) => (
-                  <button key={i} onClick={() => setActiveSlide(i)}
-                    className={`w-2 h-2 rounded-full transition-colors ${i === activeSlide ? 'bg-primary-500' : 'bg-surface-300'}`} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-3 sm:p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-surface-500">نوار اسلایدها</p>
+                  <p className="text-sm text-surface-700 dark:text-surface-300">برای جابه‌جایی و بررسی تراکم متن هر اسلاید</p>
+                </div>
+                <Badge>{toPersianNum(post.slides.length)} اسلاید</Badge>
+              </div>
+
+              <div ref={stripRef} className="flex gap-3 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-surface-300">
+                {post.slides.map((slide, i) => (
+                  <button
+                    key={slide.id}
+                    onClick={() => setActiveSlide(i)}
+                    className={cn(
+                      'flex-shrink-0 w-28 rounded-2xl border p-3 text-right transition-all',
+                      i === activeSlide
+                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 shadow-md'
+                        : 'border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 hover:border-surface-400'
+                    )}
+                    title={`اسلاید ${toPersianNum(i + 1)} — ${slide.type}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-lg leading-none">{SLIDE_TYPE_ICONS[slide.type] ?? '📄'}</span>
+                      <span className="text-[11px] text-surface-500">{toPersianNum(i + 1)}</span>
+                    </div>
+                    <p className="text-xs font-semibold text-surface-900 dark:text-white line-clamp-2 leading-5">
+                      {slide.headline}
+                    </p>
+                    <p className="mt-1 text-[11px] text-surface-500 line-clamp-2 leading-5">
+                      {getSlideTypeLabel(slide.type)}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center gap-2 text-surface-700 dark:text-surface-300">
+                <LayoutTemplate size={16} />
+                <p className="text-sm font-semibold">قالب‌های قابل استفاده</p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {CAROUSEL_TEMPLATES.map(template => (
+                  <button
+                    key={template.id}
+                    onClick={() => setActiveTemplate(template.id)}
+                    className={cn(
+                      'rounded-xl border px-3 py-3 text-right transition-all',
+                      activeTemplate === template.id
+                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 shadow-sm'
+                        : 'border-surface-200 dark:border-surface-700 hover:border-surface-400'
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: template.color }} />
+                      <span className="text-[11px] text-surface-500">{template.id}</span>
+                    </div>
+                    <p className="text-sm font-semibold text-surface-900 dark:text-white">{template.label}</p>
+                  </button>
                 ))}
               </div>
             </CardContent>
@@ -92,13 +357,17 @@ export default function PostDetailPage() {
 
           <div className="flex gap-2 flex-wrap">
             {post.status === 'generated' && (
-              <Button onClick={handleApprove} className="gap-2"><Check size={16} /> تأیید</Button>
+              <Button onClick={handleApprove} className="gap-2">
+                <Check size={16} /> تأیید
+              </Button>
             )}
             {post.status === 'approved' && (
-              <Button onClick={handleSchedule} className="gap-2"><Calendar size={16} /> زمان‌بندی</Button>
+              <Button onClick={handleSchedule} className="gap-2">
+                <Calendar size={16} /> زمان‌بندی
+              </Button>
             )}
-            <Button variant="outline" onClick={() => setEditMode(!editMode)}>
-              <RotateCcw size={16} className="ml-1" />
+            <Button variant="outline" onClick={() => setEditMode(v => !v)} className="gap-2">
+              <Edit3 size={16} />
               {editMode ? 'پایان ویرایش' : 'ویرایش'}
             </Button>
           </div>
@@ -107,74 +376,265 @@ export default function PostDetailPage() {
         <div className="space-y-4">
           <Card>
             <CardHeader><CardTitle>اطلاعات پست</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
               <div>
                 <label className="text-sm text-surface-500 mb-1 block">عنوان</label>
                 {editMode ? (
-                  <Input value={post.title} onChange={(e) => handleUpdate({ title: e.target.value })} />
+                  <Input value={post.title} onChange={e => handleUpdate({ title: e.target.value })} />
                 ) : (
-                  <p className="font-medium text-surface-900 dark:text-white">{post.title}</p>
+                  <p className="font-medium text-surface-900 dark:text-white leading-relaxed">{post.title}</p>
                 )}
               </div>
+
               <div>
-                <label className="text-sm text-surface-500 mb-1 block">Hook</label>
+                <div className="flex items-center justify-between mb-1 gap-3">
+                  <label className="text-sm text-surface-500">Hook</label>
+                  <button
+                    onClick={handleImproveHook}
+                    disabled={hookLoading}
+                    className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400 disabled:opacity-50 transition-colors font-medium"
+                  >
+                    {hookLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    بهبود ✨
+                  </button>
+                </div>
+                {hookError && <p className="text-xs text-red-500 mb-1">{hookError}</p>}
                 {editMode ? (
-                  <Textarea value={post.hook} onChange={(e) => handleUpdate({ hook: e.target.value })} rows={2} />
+                  <Textarea value={post.hook} onChange={e => handleUpdate({ hook: e.target.value })} rows={2} />
                 ) : (
-                  <p className="text-surface-700 dark:text-surface-300">{post.hook}</p>
+                  <p className="text-surface-700 dark:text-surface-300 text-sm leading-relaxed">{post.hook}</p>
                 )}
               </div>
+
               <div>
                 <label className="text-sm text-surface-500 mb-1 block">کپشن</label>
                 {editMode ? (
-                  <Textarea value={post.caption} onChange={(e) => handleUpdate({ caption: e.target.value })} rows={4} />
+                  <Textarea value={post.caption} onChange={e => handleUpdate({ caption: e.target.value })} rows={5} />
                 ) : (
-                  <p className="text-sm text-surface-600 dark:text-surface-400 whitespace-pre-line">{post.caption}</p>
+                  <p className="text-sm text-surface-600 dark:text-surface-400 whitespace-pre-line leading-8">{post.caption}</p>
                 )}
               </div>
+
               <div>
                 <label className="text-sm text-surface-500 mb-1 block">هشتگ‌ها</label>
-                <p className="text-sm text-primary-600">{post.hashtags.join(' ')}</p>
+                <p className="text-sm text-primary-600 dark:text-primary-400 leading-8">{post.hashtags.join(' ')}</p>
               </div>
-              <div className="pt-2 border-t border-surface-100 dark:border-surface-800">
-                <p className="text-xs text-surface-400">هزینه تقریبی تولید: ${post.estimatedCost.total.toFixed(2)}</p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-surface-100 dark:border-surface-800">
+                <div className="rounded-xl bg-surface-50 dark:bg-surface-900 p-3">
+                  <p className="text-xs text-surface-500 mb-1">موضوع</p>
+                  <p className="text-sm font-medium text-surface-900 dark:text-white">{post.topic}</p>
+                </div>
+                <div className="rounded-xl bg-surface-50 dark:bg-surface-900 p-3">
+                  <p className="text-xs text-surface-500 mb-1">سبک تصویری</p>
+                  <p className="text-sm font-medium text-surface-900 dark:text-white">{post.imageStyle}</p>
+                </div>
+                <div className="rounded-xl bg-surface-50 dark:bg-surface-900 p-3">
+                  <p className="text-xs text-surface-500 mb-1">هزینه تقریبی</p>
+                  <p className="text-sm font-medium text-surface-900 dark:text-white">${post.estimatedCost.total.toFixed(4)}</p>
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          {editMode && (
-            <Card>
-              <CardHeader><CardTitle>ویرایش اسلاید {activeSlide + 1}</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <Input value={post.slides[activeSlide].headline}
-                  onChange={(e) => handleUpdateSlide(activeSlide, { headline: e.target.value })} placeholder="تیتر اسلاید" />
-                <Textarea value={post.slides[activeSlide].body}
-                  onChange={(e) => handleUpdateSlide(activeSlide, { body: e.target.value })} placeholder="متن اسلاید" rows={3} />
-                <Input value={post.slides[activeSlide].imagePrompt}
-                  onChange={(e) => handleUpdateSlide(activeSlide, { imagePrompt: e.target.value })} placeholder="پرامپت تصویر" />
-              </CardContent>
-            </Card>
-          )}
+          <Card>
+            <CardHeader>
+              <CardTitle>ویرایش اسلاید {toPersianNum(activeSlide + 1)}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-50 dark:bg-surface-900 p-3">
+                <div>
+                  <p className="text-sm font-semibold text-surface-900 dark:text-white">{currentSlide.headline}</p>
+                  <p className="text-xs text-surface-500 mt-1">{getSlideTypeLabel(currentSlide.type)}</p>
+                </div>
+                <div className="text-2xl">{SLIDE_TYPE_ICONS[currentSlide.type] ?? '📄'}</div>
+              </div>
+
+              <div>
+                <label className="text-xs text-surface-500 mb-1 block">تیتر</label>
+                <Input
+                  value={currentSlide.headline}
+                  onChange={e => handleUpdateSlide(activeSlide, { headline: e.target.value })}
+                  placeholder="تیتر اسلاید"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-surface-500 mb-1 block">متن</label>
+                <Textarea
+                  value={currentSlide.body}
+                  onChange={e => handleUpdateSlide(activeSlide, { body: e.target.value })}
+                  placeholder="متن اسلاید"
+                  rows={5}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-surface-500 mb-1 block">جهت بصری</label>
+                <Textarea
+                  value={currentSlide.visualDirection}
+                  onChange={e => handleUpdateSlide(activeSlide, { visualDirection: e.target.value })}
+                  placeholder="توضیح چیدمان و حس بصری"
+                  rows={3}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-surface-500 mb-1 block">پرامپت تصویر</label>
+                <Textarea
+                  value={currentSlide.imagePrompt}
+                  onChange={e => handleUpdateSlide(activeSlide, { imagePrompt: e.target.value })}
+                  placeholder="پرامپت تصویر"
+                  rows={3}
+                />
+              </div>
+
+              <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-3 space-y-3">
+                <div className="flex items-center gap-2 text-surface-700 dark:text-surface-300">
+                  <ScanSearch size={16} />
+                  <p className="text-sm font-semibold">بازنویسی همین اسلاید</p>
+                </div>
+
+                {!rewriteOpen ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setRewriteOpen(true)
+                      setRewriteError('')
+                    }}
+                    className="gap-2 w-full justify-center"
+                  >
+                    <Sparkles size={14} />
+                    AI بازنویسی
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <label className="text-xs text-surface-500 block">دستورالعمل بازنویسی</label>
+                    <Input
+                      value={rewriteInstruction}
+                      onChange={e => setRewriteInstruction(e.target.value)}
+                      placeholder="مثلاً: کوتاه‌تر کن، رسمی‌تر کن، تیتر را تیزتر کن"
+                      onKeyDown={e => e.key === 'Enter' && handleRewriteSlide()}
+                      autoFocus
+                    />
+                    {rewriteError && <p className="text-xs text-red-500">{rewriteError}</p>}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={handleRewriteSlide}
+                        loading={rewriteLoading}
+                        disabled={!rewriteInstruction.trim()}
+                        className="gap-1.5 flex-1"
+                      >
+                        {rewriteLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                        بازنویسی
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setRewriteOpen(false)
+                          setRewriteInstruction('')
+                          setRewriteError('')
+                        }}
+                      >
+                        لغو
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>منابع تحقیق</CardTitle></CardHeader>
+            <CardContent className="space-y-5">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/20 p-4">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">منابع تأییدشده</p>
+                    <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80">این بخش در اولویت نمایش قرار می‌گیرد.</p>
+                  </div>
+                  <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    {toPersianNum(verifiedSources.length)} مورد
+                  </Badge>
+                </div>
+
+                <div className="space-y-3">
+                  {verifiedSources.length > 0 ? verifiedSources.map(source => {
+                    const meta = getVerificationMeta(source.verificationStatus)
+                    const Icon = meta.icon
+                    return (
+                      <div key={source.id} className="rounded-xl bg-white/80 dark:bg-surface-950/40 border border-emerald-100 dark:border-emerald-900/60 p-3">
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <div>
+                            <p className="text-sm font-semibold text-surface-900 dark:text-white leading-6">{source.title}</p>
+                            <p className="text-xs text-surface-500 mt-1">{source.publisher || 'ناشر نامشخص'}{source.date ? ` · ${source.date}` : ''}</p>
+                          </div>
+                          <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium', meta.className)}>
+                            <Icon size={12} /> {meta.label}
+                          </span>
+                        </div>
+                        {source.url && (
+                          <a href={source.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline">
+                            مشاهده منبع
+                            <ExternalLink size={12} />
+                          </a>
+                        )}
+                      </div>
+                    )
+                  }) : (
+                    <p className="text-sm text-surface-500">منبع تأییدشده‌ای برای این پست ثبت نشده است.</p>
+                  )}
+                </div>
+              </div>
+
+              {unverifiedSources.length > 0 && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-surface-900 dark:text-white">منابع مدل یا تأییدنشده</p>
+                    <p className="text-xs text-surface-500 mt-1">این موارد جدا از منابع تأییدشده نمایش داده می‌شوند تا هم‌ارز تلقی نشوند.</p>
+                  </div>
+                  <div className="space-y-2">
+                    {unverifiedSources.map(source => {
+                      const meta = getVerificationMeta(source.verificationStatus)
+                      const Icon = meta.icon
+                      return (
+                        <div key={source.id} className="rounded-xl border border-surface-200 dark:border-surface-800 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium text-surface-900 dark:text-white leading-6">{source.title}</p>
+                              <p className="text-xs text-surface-500 mt-1">{source.publisher || 'ناشر نامشخص'}{source.date ? ` · ${source.date}` : ''}</p>
+                            </div>
+                            <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium', meta.className)}>
+                              <Icon size={12} /> {meta.label}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {post.qualityScore && (
             <Card>
               <CardHeader><CardTitle>امتیاز کیفیت</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-3">
                 {Object.entries(post.qualityScore).map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between">
-                    <span className="text-sm text-surface-600 dark:text-surface-400">
-                      {key === 'hook' && 'Hook'}
-                      {key === 'clarity' && 'وضوح'}
-                      {key === 'originality' && 'اصالت'}
-                      {key === 'persianNaturalness' && 'روانی فارسی'}
-                      {key === 'factualConfidence' && 'اعتماد به facts'}
-                      {key === 'visualConsistency' && 'هماهنگی بصری'}
+                  <div key={key} className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-surface-600 dark:text-surface-400 shrink-0">
+                      {QUALITY_SCORE_LABELS[key] ?? key}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 bg-surface-200 dark:bg-surface-700 rounded-full h-1.5">
-                        <div className="bg-primary-500 h-1.5 rounded-full" style={{ width: `${(value as number) * 10}%` }} />
+                    <div className="flex items-center gap-2 flex-1">
+                      <div className="flex-1 bg-surface-200 dark:bg-surface-700 rounded-full h-1.5">
+                        <div className="bg-primary-500 h-1.5 rounded-full transition-all" style={{ width: `${(value as number) * 10}%` }} />
                       </div>
-                      <span className="text-xs text-surface-500 w-6">{value}/10</span>
+                      <span className="text-xs text-surface-500 w-8 text-left">{value}/۱۰</span>
                     </div>
                   </div>
                 ))}
@@ -184,5 +644,13 @@ export default function PostDetailPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+function ArrowRight({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12h14M12 5l7 7-7 7" />
+    </svg>
   )
 }
