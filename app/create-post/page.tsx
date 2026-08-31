@@ -1,3 +1,5 @@
+export type CreatePostMode = 'auto' | 'topic' | 'idea' | 'inspiration'
+
 'use client'
 
 import { useState } from 'react'
@@ -12,10 +14,8 @@ import { createPost } from '@/lib/db'
 import { PostPackage } from '@/types'
 import { Sparkles, Wand2, Lightbulb, Type, Link2 } from 'lucide-react'
 
-export type CreatePostMode = 'auto' | 'topic' | 'idea' | 'inspiration'
-
 export default function CreatePostPage() {
-  const [mode, setMode] = useState<CreatePostMode>('auto')
+  const [mode, setMode] = useState<CreatePostMode>('topic')
   const [input, setInput] = useState('')
   const [contentType, setContentType] = useState('carousel')
   const [loading, setLoading] = useState(false)
