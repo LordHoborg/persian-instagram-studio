@@ -129,33 +129,31 @@ export async function createPost(
   })
 
   if (post.slides?.length) {
-    await db.insert(postSlides).values(
-      post.slides.map(s => ({
-        id: s.id || generateId(),
-        postId: id,
-        slideNumber: s.slideNumber,
-        type: s.type,
-        headline: s.headline,
-        body: s.body,
-        visualDirection: s.visualDirection,
-        imagePrompt: s.imagePrompt,
-        imageAssetId: s.imageAssetId ?? null,
-      }))
-    )
+    const slideValues = post.slides.map(s => ({
+      id: generateId(),
+      postId: id,
+      slideNumber: s.slideNumber,
+      type: s.type,
+      headline: s.headline,
+      body: s.body,
+      visualDirection: s.visualDirection,
+      imagePrompt: s.imagePrompt,
+      imageAssetId: s.imageAssetId ?? null,
+    }))
+    await db.insert(postSlides).values(slideValues)
   }
 
   if (post.sources?.length) {
-    await db.insert(sources).values(
-      post.sources.map(s => ({
-        id: s.id || generateId(),
-        postId: id,
-        title: s.title,
-        url: s.url,
-        publisher: s.publisher,
-        publishedAt: s.date || null,
-        verificationStatus: s.verificationStatus ?? s.verified ?? 'unverified',
-      }))
-    )
+    const sourceValues = post.sources.map(s => ({
+      id: generateId(),
+      postId: id,
+      title: s.title,
+      url: s.url,
+      publisher: s.publisher,
+      publishedAt: s.date || null,
+      verificationStatus: s.verificationStatus ?? s.verified ?? 'unverified',
+    }))
+    await db.insert(sources).values(sourceValues)
   }
 
   return (await getPostById(id))!
@@ -191,36 +189,34 @@ export async function updatePost(id: string, updates: Partial<PostPackage>): Pro
   if (updates.slides) {
     await db.delete(postSlides).where(eq(postSlides.postId, id))
     if (updates.slides.length) {
-      await db.insert(postSlides).values(
-        updates.slides.map(s => ({
-          id: s.id || generateId(),
-          postId: id,
-          slideNumber: s.slideNumber,
-          type: s.type,
-          headline: s.headline,
-          body: s.body,
-          visualDirection: s.visualDirection,
-          imagePrompt: s.imagePrompt,
-          imageAssetId: s.imageAssetId ?? null,
-        }))
-      )
+      const slideValues = updates.slides.map(s => ({
+        id: generateId(),
+        postId: id,
+        slideNumber: s.slideNumber,
+        type: s.type,
+        headline: s.headline,
+        body: s.body,
+        visualDirection: s.visualDirection,
+        imagePrompt: s.imagePrompt,
+        imageAssetId: s.imageAssetId ?? null,
+      }))
+      await db.insert(postSlides).values(slideValues)
     }
   }
 
   if (updates.sources) {
     await db.delete(sources).where(eq(sources.postId, id))
     if (updates.sources.length) {
-      await db.insert(sources).values(
-        updates.sources.map(s => ({
-          id: s.id || generateId(),
-          postId: id,
-          title: s.title,
-          url: s.url,
-          publisher: s.publisher,
-          publishedAt: s.date || null,
-          verificationStatus: s.verificationStatus ?? s.verified ?? 'unverified',
-        }))
-      )
+      const sourceValues = updates.sources.map(s => ({
+        id: generateId(),
+        postId: id,
+        title: s.title,
+        url: s.url,
+        publisher: s.publisher,
+        publishedAt: s.date || null,
+        verificationStatus: s.verificationStatus ?? s.verified ?? 'unverified',
+      }))
+      await db.insert(sources).values(sourceValues)
     }
   }
 
