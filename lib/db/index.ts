@@ -448,10 +448,12 @@ export async function addPattern(pattern: Omit<LearnedPattern, 'id' | 'createdAt
 export async function getIntegrationStatus(): Promise<IntegrationStatus> {
   await ensureInitialized()
   const row = await db.select().from(appSettings).where(eq(appSettings.key, 'integration_status')).limit(1)
-  if (!row[0]) {
-    return { instagram: { connected: false }, openai: { configured: false } }
+  const openaiConfigured = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim() !== '' && process.env.USE_MOCK_AI !== 'true')
+  const stored = row[0]?.value as IntegrationStatus | undefined
+  return {
+    instagram: stored?.instagram ?? { connected: false },
+    openai: { configured: openaiConfigured },
   }
-  return row[0].value as IntegrationStatus
 }
 
 export async function updateIntegrationStatus(status: IntegrationStatus): Promise<void> {
