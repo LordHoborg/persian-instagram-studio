@@ -95,7 +95,7 @@ export function Sidebar() {
               <Instagram size={18} className="text-surface-400" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-surface-700 dark:text-surface-300 truncate">Instagram</p>
-                <p className="text-[10px] text-surface-400">مدیریت اتصال</p>
+                <p className="text-[10px] text-surface-500 dark:text-surface-300">مدیریت اتصال</p>
               </div>
             </Link>
           </div>

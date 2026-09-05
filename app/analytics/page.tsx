@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getPosts } from '@/lib/db'
-import { PostPackage } from '@/types'
+import { getIntegrationStatus, getPosts } from '@/lib/db'
+import { IntegrationStatus, PostPackage } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { formatPersianNumber } from '@/lib/utils'
 import { BarChart3, Eye, Heart, MessageCircle, Share2, Bookmark } from 'lucide-react'
@@ -11,15 +11,21 @@ export default function AnalyticsPage() {
   const [posts, setPosts] = useState<PostPackage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [integration, setIntegration] = useState<IntegrationStatus | null>(null)
 
   useEffect(() => {
-    getPosts()
-      .then(setPosts)
+    Promise.all([getPosts(), getIntegrationStatus()])
+      .then(([loadedPosts, loadedIntegration]) => {
+        setPosts(loadedPosts)
+        setIntegration(loadedIntegration)
+      })
       .catch(reason => setError(reason instanceof Error ? reason.message : 'بارگذاری گزارش ناموفق بود'))
       .finally(() => setLoading(false))
   }, [])
 
-  const published = posts.filter(p => p.status === 'published' && p.performanceMetrics)
+  const published = integration?.instagram.connected
+    ? posts.filter(p => p.status === 'published' && p.performanceMetrics)
+    : []
 
   const totals = published.reduce((acc, p) => ({
     views: acc.views + (p.performanceMetrics?.views || 0),
@@ -38,6 +44,11 @@ export default function AnalyticsPage() {
 
       {error && <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
       {loading && <p role="status" className="text-center py-12 text-surface-500">در حال بارگذاری گزارش...</p>}
+      {!loading && !integration?.instagram.connected && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+          داده‌ی ساختگی نمایش داده نمی‌شود. برای مشاهده‌ی آمار واقعی باید Instagram Graph API متصل و داده‌های Insights همگام‌سازی شود.
+        </div>
+      )}
 
       {!loading && <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {[

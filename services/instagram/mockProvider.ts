@@ -38,19 +38,7 @@ export class MockInstagramProvider implements InstagramProviderInterface {
 
   async getMediaInsights(mediaId: string): Promise<{ success: boolean; insights?: InstagramMediaInsights; error?: string }> {
     if (!this.connected) return { success: false, error: 'Instagram متصل نیست' }
-    return {
-      success: true,
-      insights: {
-        id: mediaId,
-        impressions: 12400,
-        reach: 8900,
-        engagement: 1450,
-        saved: 567,
-        shares: 234,
-        comments: 89,
-        likes: 1450,
-      }
-    }
+    return { success: false, error: `داده Insights ساختگی تولید نمی‌شود؛ رسانه ${mediaId} به API واقعی متصل نیست.` }
   }
 
   async disconnect(): Promise<void> {

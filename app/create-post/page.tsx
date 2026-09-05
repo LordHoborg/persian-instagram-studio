@@ -23,14 +23,17 @@ export default function CreatePostPage() {
   const [withReview, setWithReview] = useState(true)
   const [generateImages, setGenerateImages] = useState(false)
   const [error, setError] = useState('')
+  const [warnings, setWarnings] = useState<string[]>([])
 
   const handleGenerate = async () => {
     setLoading(true)
     setError('')
+    setWarnings([])
     try {
       const topic = mode === 'auto' ? undefined : input.trim()
       const result = await generatePost(topic, contentType, { withReview, generateImages })
       setGeneratedPost(result.post)
+      setWarnings(result.warnings)
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'خطا در تولید پست')
     } finally {
@@ -62,6 +65,14 @@ export default function CreatePostPage() {
         </div>
         <Card>
           <CardContent className="p-6 space-y-4">
+            {warnings.length > 0 && (
+              <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                <p className="font-semibold">پست ذخیره شد، اما تولید بعضی تصاویر کامل نشد:</p>
+                <ul className="mt-2 list-disc space-y-1 pr-5">
+                  {warnings.map(warning => <li key={warning}>{warning}</li>)}
+                </ul>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Badge>{generatedPost.contentPillar}</Badge>
               <Badge variant="info">{generatedPost.contentType}</Badge>

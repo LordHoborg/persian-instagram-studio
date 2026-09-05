@@ -13,7 +13,7 @@ const SlideSchema = z.object({
   body: z.string().max(10_000),
   visualDirection: z.string().max(5_000),
   imagePrompt: z.string().max(5_000),
-  imageAssetId: z.string().max(2_000).nullable().optional(),
+  imageAssetId: z.string().max(25_000_000).nullable().optional(),
 }).strict()
 
 const SourceSchema = z.object({
@@ -124,6 +124,12 @@ export async function POST(req: NextRequest) {
     }).where(eq(posts.id, id))
 
     if (updates.slides) {
+      const existingSlides = await db.select({
+        slideNumber: postSlides.slideNumber,
+        imageAssetId: postSlides.imageAssetId,
+      }).from(postSlides).where(eq(postSlides.postId, id))
+      const existingAssets = new Map(existingSlides.map(slide => [slide.slideNumber, slide.imageAssetId]))
+
       await db.delete(postSlides).where(eq(postSlides.postId, id))
       if (updates.slides.length) {
         const slideValues = updates.slides.map(s => ({
@@ -135,7 +141,9 @@ export async function POST(req: NextRequest) {
           body: s.body,
           visualDirection: s.visualDirection,
           imagePrompt: s.imagePrompt,
-          imageAssetId: s.imageAssetId ?? null,
+          imageAssetId: s.imageAssetId === undefined
+            ? (existingAssets.get(s.slideNumber) ?? null)
+            : s.imageAssetId,
         }))
         await db.insert(postSlides).values(slideValues)
       }

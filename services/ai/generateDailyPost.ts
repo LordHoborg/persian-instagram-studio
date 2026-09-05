@@ -34,6 +34,7 @@ export interface GenerateDailyPostResult {
   totalCost: number
   usedResearch: boolean
   generationSessionId: string
+  warnings: string[]
 }
 
 // Schema for improved topic candidates
@@ -107,6 +108,7 @@ export async function generateDailyPost(
   let textCost = 0
   let usedResearch = false
   let researchData: ResearchResultData | undefined
+  const warnings: string[] = []
 
   // ── Step 1: Load Content Brain ──────────────────────────────────────────────
   const [profile, pillars, recentMemory, budget, usageHistory] = await Promise.all([
@@ -338,18 +340,36 @@ export async function generateDailyPost(
   }))
 
   const remainingImageAllowance = Math.max(0, budget.imageGenerationLimit - monthlyImages)
-  if (generateImages) for (let index = 0; index < Math.min(generatedPost.slides.length, remainingImageAllowance); index += 1) {
-    const slide = generatedPost.slides[index]
-    if (!slide.imagePrompt) {
-      continue
+  const imageTargetCount = Math.min(generatedPost.slides.length, remainingImageAllowance)
+  if (generateImages && imageTargetCount < generatedPost.slides.length) {
+    warnings.push(`به‌دلیل سقف ماهانه، فقط ${imageTargetCount} تصویر از ${generatedPost.slides.length} تصویر قابل تولید بود.`)
+  }
+  if (generateImages) {
+    const aiProvider = getAIProvider()
+    const generateImage = aiProvider.generateImage?.bind(aiProvider)
+    if (!generateImage) {
+      warnings.push('Provider فعلی از تولید تصویر پشتیبانی نمی‌کند.')
     }
-    try {
-      const aiProvider = getAIProvider()
-      if (!aiProvider.generateImage) {
-        throw new Error('Image generation not supported by current provider')
+
+    for (let index = 0; generateImage && index < imageTargetCount; index += 1) {
+      const slide = generatedPost.slides[index]
+      const imagePrompt = slide.imagePrompt?.trim()
+      if (!imagePrompt) {
+        warnings.push(`اسلاید ${index + 1} پرامپت تصویر نداشت.`)
+        continue
       }
-      const imageResult = await aiProvider.generateImage(slide.imagePrompt, '1024x1536')
-      if (imageResult.success && imageResult.data) {
+
+      let generated = false
+      let lastError = 'پاسخ قابل استفاده‌ای دریافت نشد.'
+      const maxAttempts = Math.max(1, budget.maxRetries + 1)
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const imageResult = await generateImage(imagePrompt, '1024x1536')
+        if (!imageResult.success || !imageResult.data) {
+          lastError = imageResult.error ?? lastError
+          if (attempt + 1 < maxAttempts) await new Promise(resolve => setTimeout(resolve, Math.min(4_000, 750 * (2 ** attempt))))
+          continue
+        }
+
         const imageUrl =
           imageResult.data.assetType === 'base64'
             ? `data:${imageResult.data.mimeType};base64,${imageResult.data.data}`
@@ -370,9 +390,13 @@ export async function generateDailyPost(
           totalCost: imageCost,
         })
         slidesWithImages[index] = { ...slidesWithImages[index], imageAssetId: imageUrl }
+        generated = true
+        break
       }
-    } catch (err) {
-      console.error('[generateDailyPost] Image generation failed:', err)
+
+      if (!generated) {
+        warnings.push(`تولید تصویر اسلاید ${index + 1} پس از ${maxAttempts} تلاش ناموفق بود: ${lastError}`)
+      }
     }
   }
 
@@ -451,5 +475,6 @@ export async function generateDailyPost(
     totalCost,
     usedResearch,
     generationSessionId,
+    warnings,
   }
 }

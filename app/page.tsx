@@ -54,10 +54,11 @@ export default async function DashboardPage() {
     })
     .reduce((sum, u) => sum + u.totalCost, 0)
 
-  const totalEngagement = publishedPosts.reduce((sum, p) => {
+  const performancePosts = publishedPosts.filter(post => post.performanceMetrics)
+  const totalEngagement = performancePosts.reduce((sum, p) => {
     return sum + (p.performanceMetrics?.engagementRate || 0)
   }, 0)
-  const avgEngagement = publishedPosts.length > 0 ? (totalEngagement / publishedPosts.length).toFixed(1) : '0'
+  const avgEngagement = performancePosts.length > 0 ? (totalEngagement / performancePosts.length).toFixed(1) : '0'
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -292,7 +293,7 @@ export default async function DashboardPage() {
                   <div key={pattern.id} className="p-3 rounded-lg bg-surface-50 dark:bg-surface-800/50">
                     <div className="flex items-center justify-between mb-1">
                       <p className="text-sm font-medium text-surface-800 dark:text-surface-200">{pattern.pattern}</p>
-                      <span className="text-xs text-emerald-600 font-medium">{Math.round(pattern.confidence * 100)}%</span>
+                      <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{Math.round(pattern.confidence * 100)}%</span>
                     </div>
                     <div className="w-full bg-surface-200 dark:bg-surface-700 rounded-full h-1.5">
                       <div

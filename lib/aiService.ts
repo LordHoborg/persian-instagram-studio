@@ -1,7 +1,7 @@
 'use server'
 
 import { getAIProvider } from '@/services/ai/provider'
-import { addAIUsage } from './db'
+import { addAIUsage, getAIUsage, getBudget } from './db'
 import { PostSlide } from '@/types'
 import { getModelForOperation } from '@/services/ai/modelConfig'
 import { calculateImageCost } from './ai/pricing'
@@ -151,6 +151,9 @@ export async function improveHook(
 export async function generateHeroImage(
   prompt: string
 ): Promise<{ url: string; cost: number }> {
+  const normalizedPrompt = prompt.trim()
+  if (!normalizedPrompt) throw new Error('پرامپت تصویر نمی‌تواند خالی باشد.')
+
   const provider = getAIProvider()
   const model = getModelForOperation('generate_image')
 
@@ -158,30 +161,37 @@ export async function generateHeroImage(
     throw new Error('Image generation not supported by current provider')
   }
 
-  const result = await provider.generateImage(prompt, '1024x1024')
+  const [budget, usageHistory] = await Promise.all([getBudget(), getAIUsage()])
+  const now = new Date()
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+  const dailySpend = usageHistory.filter(item => new Date(item.createdAt).getTime() >= startOfDay).reduce((sum, item) => sum + item.totalCost, 0)
+  const monthlyUsage = usageHistory.filter(item => new Date(item.createdAt).getTime() >= startOfMonth)
+  const monthlySpend = monthlyUsage.reduce((sum, item) => sum + item.totalCost, 0)
+  const monthlyImages = monthlyUsage.reduce((sum, item) => sum + (item.imageGenerationCount ?? 0), 0)
 
-  if (!result.success || !result.data) {
-    throw new Error(result.error ?? 'Failed to generate image')
+  if (dailySpend >= budget.dailyBudget) throw new Error('بودجه روزانه هوش مصنوعی مصرف شده است.')
+  if (monthlySpend >= budget.monthlyBudget) throw new Error('بودجه ماهانه هوش مصنوعی مصرف شده است.')
+  if (monthlyImages >= budget.imageGenerationLimit) throw new Error('سقف ماهانه تولید تصویر مصرف شده است.')
+
+  const maxAttempts = Math.max(1, budget.maxRetries + 1)
+  let lastError = 'تولید تصویر ناموفق بود.'
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const result = await provider.generateImage(normalizedPrompt, '1024x1536')
+    if (!result.success || !result.data) {
+      lastError = result.error ?? lastError
+      if (attempt + 1 < maxAttempts) await new Promise(resolve => setTimeout(resolve, Math.min(4_000, 750 * (2 ** attempt))))
+      continue
+    }
+    const imageCost = result.usage.imageCost ?? calculateImageCost(model, 1, { size: result.data.size })
+    await addAIUsage({
+      operation: 'generate_image', provider: 'openai', model,
+      inputTokens: 0, outputTokens: 0, estimatedTextCost: 0,
+      imageCost, imageGenerationCount: result.usage.imageGenerationCount ?? 1,
+      webSearchCost: 0, totalCost: imageCost,
+    })
+    if (result.data.assetType === 'base64') return { url: `data:${result.data.mimeType};base64,${result.data.data}`, cost: imageCost }
+    return { url: result.data.data, cost: imageCost }
   }
-
-  const imageCost = result.usage.imageCost ?? calculateImageCost(model, 1, { size: result.data.size })
-
-  await addAIUsage({
-    operation: 'generate_image',
-    provider: 'openai',
-    model,
-    inputTokens: 0,
-    outputTokens: 0,
-    estimatedTextCost: 0,
-    imageCost,
-    imageGenerationCount: result.usage.imageGenerationCount ?? 1,
-    webSearchCost: 0,
-    totalCost: imageCost,
-  })
-
-  if (result.data.assetType === 'base64') {
-    return { url: `data:${result.data.mimeType};base64,${result.data.data}`, cost: imageCost }
-  }
-
-  return { url: result.data.data, cost: imageCost }
+  throw new Error(`تولید تصویر پس از ${maxAttempts} تلاش ناموفق بود: ${lastError}`)
 }

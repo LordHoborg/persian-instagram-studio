@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import { useParams, useRouter } from 'next/navigation'
 import { getPostById } from '@/lib/db'
+import { generateHeroImage } from '@/lib/aiService'
 import { PostPackage, PostSlide } from '@/types'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -125,6 +126,8 @@ export default function PostDetailPage() {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [saveError, setSaveError] = useState('')
   const [loadError, setLoadError] = useState('')
+  const [imageLoading, setImageLoading] = useState(false)
+  const [imageError, setImageError] = useState('')
 
   useEffect(() => {
     const load = async () => {
@@ -160,6 +163,48 @@ export default function PostDetailPage() {
     setSaveState('idle')
   }
 
+  const handleGenerateSlideImage = async () => {
+    if (!post || imageLoading) return
+    const slideIndex = activeSlide
+    const slide = post.slides[slideIndex]
+    if (!slide?.imagePrompt.trim()) {
+      setImageError('ابتدا پرامپت تصویر را وارد کنید.')
+      return
+    }
+
+    setImageLoading(true)
+    setImageError('')
+    try {
+      const generated = await generateHeroImage(slide.imagePrompt)
+      const response = await fetch('/api/post/update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          postId: post.id,
+          slideNumber: slide.slideNumber,
+          updates: { imageAssetId: generated.url },
+        }),
+      })
+      if (!response.ok) throw new Error(await responseError(response, 'ذخیره تصویر ناموفق بود'))
+
+      setPost(previous => previous ? {
+        ...previous,
+        slides: previous.slides.map((item, index) => index === slideIndex
+          ? { ...item, imageAssetId: generated.url }
+          : item),
+        estimatedCost: {
+          ...previous.estimatedCost,
+          imageCost: previous.estimatedCost.imageCost + generated.cost,
+          total: previous.estimatedCost.total + generated.cost,
+        },
+      } : null)
+    } catch (reason: unknown) {
+      setImageError(reason instanceof Error ? reason.message : 'تولید تصویر ناموفق بود')
+    } finally {
+      setImageLoading(false)
+    }
+  }
+
   const persistPostUpdates = async (updates: PostUpdatePayload) => {
     if (!post) return false
     setSaveError('')
@@ -188,7 +233,6 @@ export default function PostDetailPage() {
           body: slide.body,
           visualDirection: slide.visualDirection,
           imagePrompt: slide.imagePrompt,
-          imageAssetId: slide.imageAssetId,
         })),
       })
       setEditMode(false)
@@ -579,7 +623,7 @@ export default function PostDetailPage() {
                   <button
                     onClick={handleImproveHook}
                     disabled={hookLoading}
-                    className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 dark:text-amber-400 disabled:opacity-50 transition-colors font-medium"
+                    className="flex items-center gap-1 text-xs font-medium text-amber-700 transition-colors hover:text-amber-800 disabled:opacity-50 dark:text-amber-300 dark:hover:text-amber-200"
                   >
                     {hookLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                     بهبود ✨
@@ -676,6 +720,19 @@ export default function PostDetailPage() {
                   placeholder="پرامپت تصویر"
                   rows={3}
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 w-full"
+                  onClick={handleGenerateSlideImage}
+                  loading={imageLoading}
+                  disabled={!currentSlide.imagePrompt.trim()}
+                >
+                  <Images size={14} />
+                  {currentSlide.imageAssetId ? 'تولید دوباره تصویر این اسلاید' : 'تولید تصویر این اسلاید'}
+                </Button>
+                {imageError && <p role="alert" className="mt-2 text-xs text-red-700 dark:text-red-300">{imageError}</p>}
               </div>
 
               <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-3 space-y-3">
@@ -744,7 +801,7 @@ export default function PostDetailPage() {
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div>
                     <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">منابع تأییدشده</p>
-                    <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80">این بخش در اولویت نمایش قرار می‌گیرد.</p>
+                    <p className="text-xs text-emerald-800 dark:text-emerald-200">این بخش در اولویت نمایش قرار می‌گیرد.</p>
                   </div>
                   <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                     {toPersianNum(verifiedSources.length)} مورد

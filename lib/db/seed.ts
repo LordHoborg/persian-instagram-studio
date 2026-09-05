@@ -3,8 +3,7 @@ import { brandProfile, contentPillars, posts, postSlides, sources, learnedPatter
 import { generateId } from '@/lib/utils'
 import { CONTENT_PILLARS_DEFAULT } from '@/lib/constants'
 import { runMigrations } from './migrate'
-import { eq } from 'drizzle-orm'
-import { sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 
 let seedPromise: Promise<void> | null = null
 
@@ -23,6 +22,30 @@ async function seedDatabase() {
   if (postsTable.length === 0) {
     await runMigrations()
   }
+
+  const demoMetricsCleanup = await db.select({ key: appSettings.key })
+    .from(appSettings)
+    .where(eq(appSettings.key, 'demo_metrics_removed_v1'))
+    .limit(1)
+  if (demoMetricsCleanup.length === 0) {
+    const demoPostRows = await db.select({ postId: sources.postId })
+      .from(sources)
+      .where(eq(sources.verificationStatus, 'demo'))
+    const demoPostIds = [...new Set(demoPostRows.map(row => row.postId))]
+    if (demoPostIds.length > 0) {
+      await db.update(posts).set({
+        performanceMetrics: null,
+        status: 'approved',
+        publishedAt: null,
+      }).where(inArray(posts.id, demoPostIds))
+    }
+    await db.insert(appSettings).values({
+      key: 'demo_metrics_removed_v1',
+      value: true,
+      updatedAt: new Date().toISOString(),
+    }).onConflictDoNothing()
+  }
+
   const seeded = await db.select({ key: appSettings.key })
     .from(appSettings)
     .where(eq(appSettings.key, 'seeded'))
@@ -81,14 +104,13 @@ async function seedDatabase() {
       cta: 'نظر شما چیست؟',
       hashtags: ['#تهران_قدیم', '#قاجار', '#تاریخ_ایران', '#کاخ_گلستان', '#تهران'],
       imageStyle: 'historical',
-      status: 'published',
+      status: 'approved',
       createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
       updatedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
       scheduledAt: null,
-      publishedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      publishedAt: null,
       estimatedCost: { textCost: 0.08, researchCost: 0, imageCost: 0, total: 0.08 },
       qualityScore: { hook: 9, clarity: 8, originality: 8, persianNaturalness: 9, factualConfidence: 8, visualConsistency: 7 },
-      performanceMetrics: { views: 12400, reach: 8900, likes: 1450, comments: 89, shares: 234, saves: 567, profileVisits: 123, follows: 45, engagementRate: 4.2 },
     },
     {
       id: post2Id,
@@ -103,14 +125,13 @@ async function seedDatabase() {
       cta: 'این پست را سیو کنید',
       hashtags: ['#تاریخ_معاصر', '#میرزای_شیرازی', '#تنباکو', '#ایران'],
       imageStyle: 'editorial',
-      status: 'published',
+      status: 'approved',
       createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
       updatedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
       scheduledAt: null,
-      publishedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+      publishedAt: null,
       estimatedCost: { textCost: 0.06, researchCost: 0, imageCost: 0, total: 0.06 },
       qualityScore: { hook: 10, clarity: 9, originality: 9, persianNaturalness: 9, factualConfidence: 9, visualConsistency: 8 },
-      performanceMetrics: { views: 25600, reach: 18200, likes: 3200, comments: 156, shares: 890, saves: 1200, profileVisits: 340, follows: 89, engagementRate: 5.8 },
     },
   ])
 

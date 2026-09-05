@@ -56,7 +56,7 @@ const TEMPLATES: Record<CarouselTemplateId, TemplateConfig> = {
   editorial: {
     bg: '#1a1a2e',
     text: '#ffffff',
-    textMuted: 'rgba(255,255,255,0.65)',
+    textMuted: 'rgba(255,255,255,0.82)',
     accent: '#e94560',
     accentText: '#ffffff',
     border: 'rgba(233,69,96,0.35)',
@@ -68,7 +68,7 @@ const TEMPLATES: Record<CarouselTemplateId, TemplateConfig> = {
     bgGradient: 'linear-gradient(160deg, #3d2b1f 0%, #2a1f14 100%)',
     bg: '#3d2b1f',
     text: '#f4e4c1',
-    textMuted: 'rgba(244,228,193,0.65)',
+    textMuted: 'rgba(244,228,193,0.82)',
     accent: '#c9a227',
     accentText: '#1a0f00',
     border: 'rgba(201,162,39,0.4)',
@@ -79,7 +79,7 @@ const TEMPLATES: Record<CarouselTemplateId, TemplateConfig> = {
   minimal: {
     bg: '#ffffff',
     text: '#171717',
-    textMuted: '#6b7280',
+    textMuted: '#4b5563',
     accent: '#0ea5e9',
     accentText: '#ffffff',
     border: '#e5e7eb',
@@ -91,7 +91,7 @@ const TEMPLATES: Record<CarouselTemplateId, TemplateConfig> = {
     bg: '#0f172a',
     bgGradient: 'linear-gradient(145deg, #0f172a 0%, #1e293b 100%)',
     text: '#f8fafc',
-    textMuted: 'rgba(248,250,252,0.6)',
+    textMuted: 'rgba(248,250,252,0.82)',
     accent: '#38bdf8',
     accentText: '#0f172a',
     border: 'rgba(56,189,248,0.25)',
@@ -102,7 +102,7 @@ const TEMPLATES: Record<CarouselTemplateId, TemplateConfig> = {
   magazine: {
     bg: '#ffffff',
     text: '#1a1a1a',
-    textMuted: '#6b7280',
+    textMuted: '#4b5563',
     accent: '#dc2626',
     accentText: '#ffffff',
     border: '#e5e7eb',
@@ -650,7 +650,7 @@ export function CarouselRenderer({
       <div className="absolute inset-[10px] rounded-[22px] border z-0" style={{ borderColor: t.border, opacity: 0.9 }} aria-hidden />
 
       {imageOverlayStyle && (
-        <div className="absolute inset-0 z-0 opacity-20" style={imageOverlayStyle} aria-hidden />
+        <div className="absolute inset-0 z-0 opacity-35" style={imageOverlayStyle} aria-hidden />
       )}
 
       {t.isDark && (
