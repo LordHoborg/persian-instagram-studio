@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { GeneratedPostSchema, GeneratedIdeasSchema, QualityReviewSchema } from '@/services/ai/schemas'
+import { GeneratedPostSchema, QualityReviewSchema } from '@/services/ai/schemas'
 
 describe('GeneratedPostSchema', () => {
   it('accepts valid post', () => {

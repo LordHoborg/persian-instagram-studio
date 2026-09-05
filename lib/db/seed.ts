@@ -2,11 +2,39 @@ import { db } from './client'
 import { brandProfile, contentPillars, posts, postSlides, sources, learnedPatterns, appSettings } from './schema'
 import { generateId } from '@/lib/utils'
 import { CONTENT_PILLARS_DEFAULT } from '@/lib/constants'
+import { runMigrations } from './migrate'
+import { eq } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
+
+let seedPromise: Promise<void> | null = null
 
 export async function ensureSeeded() {
-  // Use a simple check: if posts table has any rows, skip seeding
+  seedPromise ??= seedDatabase().catch(error => {
+    seedPromise = null
+    throw error
+  })
+  await seedPromise
+}
+
+async function seedDatabase() {
+  const postsTable = await db.all<{ name: string }>(sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'posts' LIMIT 1
+  `)
+  if (postsTable.length === 0) {
+    await runMigrations()
+  }
+  const seeded = await db.select({ key: appSettings.key })
+    .from(appSettings)
+    .where(eq(appSettings.key, 'seeded'))
+    .limit(1)
+  if (seeded.length > 0) return
+
+  // Preserve databases created by older versions that already contain content.
   const postCount = await db.select().from(posts).limit(1)
-  if (postCount.length > 0) return
+  if (postCount.length > 0) {
+    await db.insert(appSettings).values({ key: 'seeded', value: true, updatedAt: new Date().toISOString() }).onConflictDoNothing()
+    return
+  }
 
   console.log('🌱 Seeding database with demo data...')
 

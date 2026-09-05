@@ -558,7 +558,7 @@ function CTASlide({ slide, t, slideCount, context }: { slide: PostSlide; t: Temp
 
         <div className="flex justify-end mt-2">
           <div
-            className="px-6 py-2.5 rounded-full text-sm font-bold shadow-lg max-w-full truncate"
+            className="px-6 py-2.5 rounded-full text-sm font-bold shadow-lg max-w-full"
             style={{ backgroundColor: t.accent, color: t.accentText, boxShadow: `0 4px 20px ${t.accent}55` }}
           >
             {context?.post?.cta || slide.headline}

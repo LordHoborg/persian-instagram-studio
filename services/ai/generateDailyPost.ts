@@ -1,6 +1,6 @@
 'use server'
 
-import { getBrandProfile, getPillars, getRecentContentMemory, createPost } from '@/lib/db'
+import { getAIUsage, getBrandProfile, getBudget, getPillars, getRecentContentMemory, createPost } from '@/lib/db'
 import { addAIUsage } from '@/lib/db'
 import { getAIProvider } from './provider'
 import { buildContentBrainContext, formatContextForPrompt } from './contentBrain'
@@ -9,13 +9,13 @@ import { buildPostWriterPrompt } from '@/lib/prompts/postWriter'
 import { buildEditorialReviewPrompt } from '@/lib/prompts/editorialReview'
 import { GeneratedPostSchema, QualityReviewSchema } from './schemas'
 import { researchTopic, shouldResearchTopic } from '@/services/research'
-import type { ResearchResultData } from '@/services/ai/types'
+import { BudgetExceededError, type ResearchResultData } from '@/services/ai/types'
 import { getModelForOperation } from './modelConfig'
 import { POST_WRITER_PROMPT } from '@/lib/prompts/postWriter'
 import { TOPIC_GENERATOR_PROMPT } from '@/lib/prompts/topicGenerator'
 import { EDITORIAL_REVIEW_PROMPT } from '@/lib/prompts/editorialReview'
 import { generateId } from '@/lib/utils'
-import { PostPackage } from '@/types'
+import { PostPackage, PostSlide } from '@/types'
 import { z } from 'zod'
 
 export interface GenerateDailyPostOptions {
@@ -25,6 +25,8 @@ export interface GenerateDailyPostOptions {
   withReview?: boolean
   /** Content type */
   contentType?: string
+  /** Generate an image for each slide. Disabled by default to prevent surprise spend. */
+  generateImages?: boolean
 }
 
 export interface GenerateDailyPostResult {
@@ -97,20 +99,43 @@ function selectBestCandidate(
 export async function generateDailyPost(
   options: GenerateDailyPostOptions = {}
 ): Promise<GenerateDailyPostResult> {
-  const { topic: providedTopic, withReview = false, contentType = 'carousel' } = options
+  const { topic: providedTopic, withReview = false, contentType = 'carousel', generateImages = false } = options
 
   const provider = getAIProvider()
   const generationSessionId = generateId()
   let totalCost = 0
+  let textCost = 0
   let usedResearch = false
   let researchData: ResearchResultData | undefined
 
   // ── Step 1: Load Content Brain ──────────────────────────────────────────────
-  const [profile, pillars, recentMemory] = await Promise.all([
+  const [profile, pillars, recentMemory, budget, usageHistory] = await Promise.all([
     getBrandProfile(),
     getPillars(),
     getRecentContentMemory(20),
+    getBudget(),
+    getAIUsage(),
   ])
+
+  const now = new Date()
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+  const dailySpend = usageHistory
+    .filter(item => new Date(item.createdAt).getTime() >= startOfDay)
+    .reduce((sum, item) => sum + item.totalCost, 0)
+  const monthlyUsage = usageHistory.filter(item => new Date(item.createdAt).getTime() >= startOfMonth)
+  const monthlySpend = monthlyUsage.reduce((sum, item) => sum + item.totalCost, 0)
+  const monthlyImages = monthlyUsage.reduce((sum, item) => sum + (item.imageGenerationCount ?? 0), 0)
+
+  if (dailySpend >= budget.dailyBudget) {
+    throw new BudgetExceededError('بودجه روزانه هوش مصنوعی مصرف شده است. سقف را در تنظیمات افزایش دهید.')
+  }
+  if (monthlySpend >= budget.monthlyBudget) {
+    throw new BudgetExceededError('بودجه ماهانه هوش مصنوعی مصرف شده است. سقف را در تنظیمات افزایش دهید.')
+  }
+  if (generateImages && monthlyImages >= budget.imageGenerationLimit) {
+    throw new BudgetExceededError('سقف ماهانه تولید تصویر مصرف شده است.')
+  }
 
   const brainCtx = buildContentBrainContext(profile, pillars, recentMemory)
   const brandContextStr = formatContextForPrompt(brainCtx)
@@ -152,6 +177,7 @@ export async function generateDailyPost(
     })
 
     totalCost += ideasResult.usage.estimatedCost
+    textCost += ideasResult.usage.estimatedCost
 
     if (!ideasResult.success || !ideasResult.data) {
       throw new Error(ideasResult.error ?? 'تولید ایده‌های موضوعی ناموفق بود')
@@ -248,6 +274,7 @@ export async function generateDailyPost(
   })
 
   totalCost += postResult.usage.estimatedCost
+  textCost += postResult.usage.estimatedCost
 
   const generatedPost = postResult.data
 
@@ -270,8 +297,14 @@ export async function generateDailyPost(
     })
 
     if (reviewResult.success && reviewResult.data) {
-      const { feedback: _feedback, ...scores } = reviewResult.data
-      qualityScore = scores
+      qualityScore = {
+        hook: reviewResult.data.hook,
+        clarity: reviewResult.data.clarity,
+        originality: reviewResult.data.originality,
+        persianNaturalness: reviewResult.data.persianNaturalness,
+        factualConfidence: reviewResult.data.factualConfidence,
+        visualConsistency: reviewResult.data.visualConsistency,
+      }
 
       await addAIUsage({
         generationSessionId,
@@ -291,13 +324,64 @@ export async function generateDailyPost(
       })
 
       totalCost += reviewResult.usage.estimatedCost
+      textCost += reviewResult.usage.estimatedCost
     }
   }
 
-  // ── Step 6: Save post ───────────────────────────────────────────────────────
+  // ── Step 5.5: Generate images ────────────────────────────────────────
+  let imageTotalCost = 0
+  const slidesWithImages: PostSlide[] = generatedPost.slides.map(slide => ({
+    ...slide,
+    visualDirection: slide.visualDirection ?? '',
+    imagePrompt: slide.imagePrompt ?? '',
+    imageAssetId: null,
+  }))
+
+  const remainingImageAllowance = Math.max(0, budget.imageGenerationLimit - monthlyImages)
+  if (generateImages) for (let index = 0; index < Math.min(generatedPost.slides.length, remainingImageAllowance); index += 1) {
+    const slide = generatedPost.slides[index]
+    if (!slide.imagePrompt) {
+      continue
+    }
+    try {
+      const aiProvider = getAIProvider()
+      if (!aiProvider.generateImage) {
+        throw new Error('Image generation not supported by current provider')
+      }
+      const imageResult = await aiProvider.generateImage(slide.imagePrompt, '1024x1536')
+      if (imageResult.success && imageResult.data) {
+        const imageUrl =
+          imageResult.data.assetType === 'base64'
+            ? `data:${imageResult.data.mimeType};base64,${imageResult.data.data}`
+            : imageResult.data.data
+        const imageCost = imageResult.usage.imageCost ?? 0
+        imageTotalCost += imageCost
+        await addAIUsage({
+          generationSessionId,
+          operation: 'generate_image',
+          provider: 'openai',
+          model: getModelForOperation('generate_image'),
+          inputTokens: 0,
+          outputTokens: 0,
+          estimatedTextCost: 0,
+          imageCost,
+          imageGenerationCount: imageResult.usage.imageGenerationCount ?? 1,
+          webSearchCost: 0,
+          totalCost: imageCost,
+        })
+        slidesWithImages[index] = { ...slidesWithImages[index], imageAssetId: imageUrl }
+      }
+    } catch (err) {
+      console.error('[generateDailyPost] Image generation failed:', err)
+    }
+  }
+
+  totalCost += imageTotalCost
+
+  // ── Step 6: Save post ───────────────────────────────────────────────
   const postId = generateId()
 
-  const slidesWithIds = generatedPost.slides.map((s, i) => ({
+  const slidesWithIds = slidesWithImages.map((s, i) => ({
     ...s,
     id: s.id || `${postId}_slide_${i + 1}`,
     slideNumber: i + 1,
@@ -328,9 +412,9 @@ export async function generateDailyPost(
   const researchCost = researchData?.usage.totalCost ?? 0
 
   const estimatedCost = {
-    textCost: postResult.usage.estimatedCost,
+    textCost,
     researchCost,
-    imageCost: 0,
+    imageCost: imageTotalCost,
     total: totalCost,
   }
 
@@ -346,6 +430,7 @@ export async function generateDailyPost(
       ...s,
       visualDirection: s.visualDirection ?? '',
       imagePrompt: s.imagePrompt ?? '',
+      imageAssetId: s.imageAssetId ?? null,
     })),
     caption: generatedPost.caption,
     cta: generatedPost.cta ?? '',

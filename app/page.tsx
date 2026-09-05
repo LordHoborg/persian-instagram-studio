@@ -19,6 +19,8 @@ import {
   AlertCircle
 } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
   const posts = await getPosts()
   const pillars = await getPillars()
@@ -81,6 +83,7 @@ export default async function DashboardPage() {
               <div>
                 <p className="text-sm text-surface-500">پست‌های امسال</p>
                 <p className="text-2xl font-bold text-surface-900 dark:text-white mt-1">{formatPersianNumber(posts.length)}</p>
+                <p className="text-xs text-surface-400 mt-2">{formatPersianNumber(draftPosts.length)} پیش‌نویس فعال</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
                 <PenTool size={20} className="text-primary-600" />

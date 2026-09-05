@@ -7,38 +7,49 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
-import { Brain, Plus, Trash2, GripVertical } from 'lucide-react'
+import { Brain, Plus, GripVertical } from 'lucide-react'
 
 export default function ContentBrainPage() {
   const [profile, setProfile] = useState<BrandProfile | null>(null)
   const [pillars, setPillars] = useState<ContentPillar[]>([])
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     const load = async () => {
-      const [p, pl] = await Promise.all([getBrandProfile(), getPillars()])
-      setProfile(p)
-      setPillars(pl)
-      setLoading(false)
+      try {
+        const [p, pl] = await Promise.all([getBrandProfile(), getPillars()])
+        setProfile(p)
+        setPillars(pl)
+      } catch (reason: unknown) {
+        setError(reason instanceof Error ? reason.message : 'بارگذاری مغز محتوا ناموفق بود')
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [])
 
   const handleSave = async () => {
-    if (!profile) return
-    await updateBrandProfile(profile)
-    await updatePillars(pillars)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    if (!profile || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await updateBrandProfile(profile)
+      await updatePillars(pillars)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'ذخیره مغز محتوا ناموفق بود')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const updatePillar = (id: string, updates: Partial<ContentPillar>) => {
     setPillars(pillars.map(p => p.id === id ? { ...p, ...updates } : p))
-  }
-
-  const removePillar = (id: string) => {
-    setPillars(pillars.filter(p => p.id !== id))
   }
 
   const addPillar = () => {
@@ -54,7 +65,7 @@ export default function ContentBrainPage() {
   }
 
   if (loading) return <div className="text-center py-20 text-surface-500">در حال بارگذاری...</div>
-  if (!profile) return null
+  if (!profile) return <p role="alert" className="mx-auto max-w-4xl rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error || 'پروفایل محتوا در دسترس نیست'}</p>
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -66,8 +77,10 @@ export default function ContentBrainPage() {
           </h1>
           <p className="text-surface-500 mt-1">ترجیحات و شخصیت محتوایی شما</p>
         </div>
-        <Button onClick={handleSave}>{saved ? 'ذخیره شد!' : 'ذخیره تغییرات'}</Button>
+        <Button onClick={handleSave} loading={saving} disabled={saving}>{saved ? 'ذخیره شد!' : 'ذخیره تغییرات'}</Button>
       </div>
+
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
       <Card>
         <CardHeader><CardTitle>پروفایل برند</CardTitle></CardHeader>
@@ -122,9 +135,6 @@ export default function ContentBrainPage() {
               <button onClick={() => updatePillar(pillar.id, { enabled: !pillar.enabled })}
                 className={`px-2 py-1 rounded text-xs font-medium ${pillar.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-surface-200 text-surface-500'}`}>
                 {pillar.enabled ? 'فعال' : 'غیرفعال'}
-              </button>
-              <button onClick={() => removePillar(pillar.id)} className="text-red-400 hover:text-red-600">
-                <Trash2 size={16} />
               </button>
             </div>
           ))}

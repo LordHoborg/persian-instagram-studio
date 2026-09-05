@@ -3,22 +3,29 @@
 import { useEffect, useState } from 'react'
 import { getPosts } from '@/lib/db'
 import { PostPackage } from '@/types'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
-import { getStatusLabel, getStatusColor, formatPersianNumber } from '@/lib/utils'
+import { Card, CardContent } from '@/components/ui/Card'
+import { getStatusColor, formatPersianNumber } from '@/lib/utils'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
 
 export default function CalendarPage() {
   const [posts, setPosts] = useState<PostPackage[]>([])
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  useEffect(() => { getPosts().then(setPosts) }, [])
+  useEffect(() => {
+    getPosts()
+      .then(setPosts)
+      .catch(reason => setError(reason instanceof Error ? reason.message : 'بارگذاری تقویم ناموفق بود'))
+      .finally(() => setLoading(false))
+  }, [])
 
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const firstDay = new Date(year, month, 1).getDay()
+  // JavaScript starts weeks on Sunday; the Persian calendar grid starts on Saturday.
+  const firstDay = (new Date(year, month, 1).getDay() + 1) % 7
 
   const monthNames = ['ژانویه', 'فوریه', 'مارس', 'آوریل', 'می', 'ژوئن', 'ژوئیه', 'آگوست', 'سپتامبر', 'اکتبر', 'نوامبر', 'دسامبر']
 
@@ -38,6 +45,12 @@ export default function CalendarPage() {
           تقویم محتوا
         </h1>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCurrentDate(new Date())}
+            className="px-3 py-2 rounded-lg text-sm text-primary-700 bg-primary-50 hover:bg-primary-100 dark:bg-primary-900/20 dark:text-primary-300"
+          >
+            امروز
+          </button>
           <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800">
             <ChevronRight size={20} />
           </button>
@@ -48,7 +61,10 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      <Card>
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+      {loading && <p role="status" className="text-center py-12 text-surface-500">در حال بارگذاری تقویم...</p>}
+
+      {!loading && <Card>
         <CardContent className="p-4">
           <div className="grid grid-cols-7 gap-1 text-center mb-2">
             {['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'].map(d => (
@@ -82,7 +98,7 @@ export default function CalendarPage() {
             })}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }

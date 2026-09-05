@@ -17,18 +17,21 @@ export class MockInstagramProvider implements InstagramProviderInterface {
 
   async publishSingleImage(imageUrl: string, caption: string): Promise<{ success: boolean; mediaId?: string; error?: string }> {
     if (!this.connected) return { success: false, error: 'Instagram متصل نیست' }
+    if (!imageUrl || !caption.trim()) return { success: false, error: 'تصویر و کپشن الزامی هستند' }
     await new Promise(r => setTimeout(r, 1500))
     return { success: true, mediaId: 'media-' + Math.random().toString(36).substr(2, 9) }
   }
 
   async publishCarousel(imageUrls: string[], caption: string): Promise<{ success: boolean; mediaId?: string; error?: string }> {
     if (!this.connected) return { success: false, error: 'Instagram متصل نیست' }
+    if (imageUrls.length < 2 || !caption.trim()) return { success: false, error: 'حداقل دو تصویر و کپشن الزامی هستند' }
     await new Promise(r => setTimeout(r, 2000))
     return { success: true, mediaId: 'media-' + Math.random().toString(36).substr(2, 9) }
   }
 
   async publishReel(videoUrl: string, caption: string): Promise<{ success: boolean; mediaId?: string; error?: string }> {
     if (!this.connected) return { success: false, error: 'Instagram متصل نیست' }
+    if (!videoUrl || !caption.trim()) return { success: false, error: 'ویدئو و کپشن الزامی هستند' }
     await new Promise(r => setTimeout(r, 2000))
     return { success: true, mediaId: 'media-' + Math.random().toString(36).substr(2, 9) }
   }

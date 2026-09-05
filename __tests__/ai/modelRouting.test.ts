@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getModelForOperation, OPERATION_MODEL_MAP, MODEL_CONFIG } from '@/services/ai/modelConfig'
+import { getModelForOperation, MODEL_CONFIG } from '@/services/ai/modelConfig'
 
 describe('model routing', () => {
   it('routes generate_ideas to cheap', () => {

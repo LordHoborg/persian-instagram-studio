@@ -9,8 +9,15 @@ import { BarChart3, Eye, Heart, MessageCircle, Share2, Bookmark } from 'lucide-r
 
 export default function AnalyticsPage() {
   const [posts, setPosts] = useState<PostPackage[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  useEffect(() => { getPosts().then(setPosts) }, [])
+  useEffect(() => {
+    getPosts()
+      .then(setPosts)
+      .catch(reason => setError(reason instanceof Error ? reason.message : 'بارگذاری گزارش ناموفق بود'))
+      .finally(() => setLoading(false))
+  }, [])
 
   const published = posts.filter(p => p.status === 'published' && p.performanceMetrics)
 
@@ -29,7 +36,10 @@ export default function AnalyticsPage() {
         آنالیز عملکرد
       </h1>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      {error && <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+      {loading && <p role="status" className="text-center py-12 text-surface-500">در حال بارگذاری گزارش...</p>}
+
+      {!loading && <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {[
           { label: 'بازدید', value: totals.views, icon: Eye, color: 'text-blue-600', bg: 'bg-blue-50' },
           { label: 'لایک', value: totals.likes, icon: Heart, color: 'text-red-600', bg: 'bg-red-50' },
@@ -47,9 +57,9 @@ export default function AnalyticsPage() {
             </CardContent>
           </Card>
         ))}
-      </div>
+      </div>}
 
-      <Card>
+      {!loading && <Card>
         <CardHeader><CardTitle>پست‌های منتشر شده</CardTitle></CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -70,7 +80,7 @@ export default function AnalyticsPage() {
             {published.length === 0 && <p className="text-center text-surface-400 py-8">هنوز پست منتشر شده‌ای با داده عملکرد وجود ندارد</p>}
           </div>
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }

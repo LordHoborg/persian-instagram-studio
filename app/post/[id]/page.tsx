@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Image from 'next/image'
 import { useParams, useRouter } from 'next/navigation'
-import { getPostById, updatePost } from '@/lib/db'
+import { getPostById } from '@/lib/db'
 import { PostPackage, PostSlide } from '@/types'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -91,6 +92,15 @@ const QUALITY_SCORE_LABELS: Record<string, string> = {
   visualConsistency: 'هماهنگی بصری',
 }
 
+async function responseError(response: Response, fallback: string) {
+  const body = await response.json().catch(() => null) as { error?: string } | null
+  return body?.error ?? fallback
+}
+
+type PostUpdatePayload = Partial<Omit<PostPackage, 'slides' | 'sources' | 'versionHistory'>> & {
+  slides?: Array<Omit<PostSlide, 'id' | 'renderedHtml'>>
+}
+
 export default function PostDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -112,20 +122,29 @@ export default function PostDetailPage() {
   const [exportedSlides, setExportedSlides] = useState<Array<{ fileName: string; dataUrl: string; slideNumber: number; type: PostSlide['type'] }>>([])
   const [exportZipName, setExportZipName] = useState('')
   const [exportZipBase64, setExportZipBase64] = useState('')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [saveError, setSaveError] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     const load = async () => {
-      const p = await getPostById(params.id as string)
-      if (p) {
-        setPost(p)
-        const knownTemplates = CAROUSEL_TEMPLATES.map(template => template.id)
-        setActiveTemplate(
-          knownTemplates.includes(p.imageStyle as CarouselTemplateId)
-            ? (p.imageStyle as CarouselTemplateId)
-            : 'modern'
-        )
+      try {
+        const p = await getPostById(params.id as string)
+        if (p) {
+          setPost(p)
+          setEditMode(new URLSearchParams(window.location.search).get('edit') === 'true')
+          const knownTemplates = CAROUSEL_TEMPLATES.map(template => template.id)
+          setActiveTemplate(
+            knownTemplates.includes(p.imageStyle as CarouselTemplateId)
+              ? (p.imageStyle as CarouselTemplateId)
+              : 'modern'
+          )
+        }
+      } catch (reason: unknown) {
+        setLoadError(reason instanceof Error ? reason.message : 'بارگذاری پست ناموفق بود')
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
     load()
   }, [params.id])
@@ -136,21 +155,69 @@ export default function PostDetailPage() {
     thumb?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   }, [activeSlide])
 
-  const handleUpdate = async (updates: Partial<PostPackage>) => {
-    if (!post) return
-    const updated = await updatePost(post.id, updates)
-    if (updated) setPost(updated)
-  }
-
   const handleUpdateSlide = (index: number, updates: Partial<PostSlide>) => {
-    if (!post) return
-    const newSlides = [...post.slides]
-    newSlides[index] = { ...newSlides[index], ...updates }
-    handleUpdate({ slides: newSlides })
+    setPost(prev => prev ? { ...prev, slides: prev.slides.map((s, i) => i === index ? { ...s, ...updates } : s) } : null)
+    setSaveState('idle')
   }
 
-  const handleApprove = () => handleUpdate({ status: 'approved' })
-  const handleSchedule = () => handleUpdate({ status: 'scheduled', scheduledAt: new Date(Date.now() + 86400000).toISOString() })
+  const persistPostUpdates = async (updates: PostUpdatePayload) => {
+    if (!post) return false
+    setSaveError('')
+    const response = await fetch('/api/post/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: post.id, updates }),
+    })
+    if (!response.ok) throw new Error(await responseError(response, 'ذخیره تغییرات ناموفق بود'))
+    return true
+  }
+
+  const handleSaveEdits = async () => {
+    if (!post || saveState === 'saving') return
+    setSaveState('saving')
+    setSaveError('')
+    try {
+      await persistPostUpdates({
+        title: post.title,
+        hook: post.hook,
+        caption: post.caption,
+        slides: post.slides.map(slide => ({
+          slideNumber: slide.slideNumber,
+          type: slide.type,
+          headline: slide.headline,
+          body: slide.body,
+          visualDirection: slide.visualDirection,
+          imagePrompt: slide.imagePrompt,
+          imageAssetId: slide.imageAssetId,
+        })),
+      })
+      setEditMode(false)
+      setSaveState('saved')
+      setTimeout(() => setSaveState('idle'), 2_000)
+    } catch (reason: unknown) {
+      setSaveError(reason instanceof Error ? reason.message : 'ذخیره تغییرات ناموفق بود')
+      setSaveState('idle')
+    }
+  }
+
+  const handleApprove = async () => {
+    try {
+      await persistPostUpdates({ status: 'approved' })
+      setPost(previous => previous ? { ...previous, status: 'approved' } : null)
+    } catch (reason: unknown) {
+      setSaveError(reason instanceof Error ? reason.message : 'تأیید پست ناموفق بود')
+    }
+  }
+
+  const handleSchedule = async () => {
+    const scheduledAt = new Date(Date.now() + 86_400_000).toISOString()
+    try {
+      await persistPostUpdates({ status: 'scheduled', scheduledAt })
+      setPost(previous => previous ? { ...previous, status: 'scheduled', scheduledAt } : null)
+    } catch (reason: unknown) {
+      setSaveError(reason instanceof Error ? reason.message : 'زمان‌بندی پست ناموفق بود')
+    }
+  }
 
   const handleRewriteSlide = async () => {
     if (!post || !rewriteInstruction.trim()) return
@@ -169,8 +236,8 @@ export default function PostDetailPage() {
       setPost({ ...post, slides: newSlides })
       setRewriteInstruction('')
       setRewriteOpen(false)
-    } catch (err: any) {
-      setRewriteError(err.message ?? 'خطا در بازنویسی اسلاید')
+    } catch (err: unknown) {
+      setRewriteError(err instanceof Error ? err.message : 'خطا در بازنویسی اسلاید')
     } finally {
       setRewriteLoading(false)
     }
@@ -257,7 +324,7 @@ export default function PostDetailPage() {
     )
   }
 
-  if (!post) return <div className="text-center py-20 text-surface-500">پست یافت نشد</div>
+  if (!post) return <div role={loadError ? 'alert' : undefined} className="text-center py-20 text-surface-500">{loadError || 'پست یافت نشد'}</div>
 
   const currentSlide = post.slides[activeSlide]
 
@@ -367,9 +434,9 @@ export default function PostDetailPage() {
                     <p className="text-xs font-semibold text-surface-900 dark:text-white line-clamp-2 leading-5">
                       {slide.headline}
                     </p>
-                    <p className="mt-1 text-[11px] text-surface-500 line-clamp-2 leading-5">
-                      {getSlideTypeLabel(slide.type)}
-                    </p>
+                      <p className="mt-1 text-[11px] text-surface-500 line-clamp-2 leading-5">
+                        {slide.type !== 'cover' ? getSlideTypeLabel(slide.type) : ''}
+                      </p>
                   </button>
                 ))}
               </div>
@@ -420,11 +487,18 @@ export default function PostDetailPage() {
                 <Calendar size={16} /> زمان‌بندی
               </Button>
             )}
-            <Button variant="outline" onClick={() => setEditMode(v => !v)} className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => editMode ? handleSaveEdits() : setEditMode(true)}
+              loading={saveState === 'saving'}
+              disabled={saveState === 'saving'}
+              className="gap-2"
+            >
               <Edit3 size={16} />
-              {editMode ? 'پایان ویرایش' : 'ویرایش'}
+              {editMode ? 'ذخیره تغییرات' : saveState === 'saved' ? 'ذخیره شد' : 'ویرایش'}
             </Button>
           </div>
+          {saveError && <p role="alert" className="text-sm text-red-600">{saveError}</p>}
 
           {(exportLoading || exportError || exportedSlides.length > 0) && (
             <Card>
@@ -460,13 +534,22 @@ export default function PostDetailPage() {
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-surface-900 dark:text-white">{slide.fileName}</p>
-                              <p className="text-xs text-surface-500 mt-1">{getSlideTypeLabel(slide.type)}</p>
+                              <p className="text-xs text-surface-500 mt-1">
+                                {slide.type !== 'cover' ? getSlideTypeLabel(slide.type) : ''}
+                              </p>
                             </div>
                             <Button size="sm" variant="outline" onClick={() => handleDownloadSlide(slide.fileName, slide.dataUrl)} className="gap-1.5">
                               <Download size={14} /> PNG
                             </Button>
                           </div>
-                          <img src={slide.dataUrl} alt={slide.fileName} className="w-full rounded-xl border border-surface-200 dark:border-surface-700" />
+                          <Image
+                            src={slide.dataUrl}
+                            alt={slide.fileName}
+                            width={1080}
+                            height={1350}
+                            unoptimized
+                            className="w-full rounded-xl border border-surface-200 dark:border-surface-700"
+                          />
                         </div>
                       ))}
                     </div>
@@ -484,7 +567,7 @@ export default function PostDetailPage() {
               <div>
                 <label className="text-sm text-surface-500 mb-1 block">عنوان</label>
                 {editMode ? (
-                  <Input value={post.title} onChange={e => handleUpdate({ title: e.target.value })} />
+                  <Input value={post.title} onChange={e => { setPost({ ...post, title: e.target.value }); setSaveState('idle') }} />
                 ) : (
                   <p className="font-medium text-surface-900 dark:text-white leading-relaxed">{post.title}</p>
                 )}
@@ -504,7 +587,7 @@ export default function PostDetailPage() {
                 </div>
                 {hookError && <p className="text-xs text-red-500 mb-1">{hookError}</p>}
                 {editMode ? (
-                  <Textarea value={post.hook} onChange={e => handleUpdate({ hook: e.target.value })} rows={2} />
+                  <Textarea value={post.hook} onChange={e => { setPost({ ...post, hook: e.target.value }); setSaveState('idle') }} rows={2} />
                 ) : (
                   <p className="text-surface-700 dark:text-surface-300 text-sm leading-relaxed">{post.hook}</p>
                 )}
@@ -513,7 +596,7 @@ export default function PostDetailPage() {
               <div>
                 <label className="text-sm text-surface-500 mb-1 block">کپشن</label>
                 {editMode ? (
-                  <Textarea value={post.caption} onChange={e => handleUpdate({ caption: e.target.value })} rows={5} />
+                  <Textarea value={post.caption} onChange={e => { setPost({ ...post, caption: e.target.value }); setSaveState('idle') }} rows={5} />
                 ) : (
                   <p className="text-sm text-surface-600 dark:text-surface-400 whitespace-pre-line leading-8">{post.caption}</p>
                 )}
@@ -549,7 +632,9 @@ export default function PostDetailPage() {
               <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-50 dark:bg-surface-900 p-3">
                 <div>
                   <p className="text-sm font-semibold text-surface-900 dark:text-white">{currentSlide.headline}</p>
-                  <p className="text-xs text-surface-500 mt-1">{getSlideTypeLabel(currentSlide.type)}</p>
+                  <p className="text-xs text-surface-500 mt-1">
+                    {currentSlide.type !== 'cover' ? getSlideTypeLabel(currentSlide.type) : ''}
+                  </p>
                 </div>
                 <div className="text-2xl">{SLIDE_TYPE_ICONS[currentSlide.type] ?? '📄'}</div>
               </div>

@@ -8,7 +8,6 @@ import { Textarea } from '@/components/ui/Textarea'
 import { Select } from '@/components/ui/Select'
 import { Badge } from '@/components/ui/Badge'
 import { generatePost, generateIdeas } from '@/lib/aiService'
-import { createPost } from '@/lib/db'
 import { PostPackage } from '@/types'
 import { Sparkles, Wand2, Lightbulb, Type, Link2 } from 'lucide-react'
 
@@ -21,16 +20,19 @@ export default function CreatePostPage() {
   const [loading, setLoading] = useState(false)
   const [ideas, setIdeas] = useState<string[]>([])
   const [generatedPost, setGeneratedPost] = useState<PostPackage | null>(null)
+  const [withReview, setWithReview] = useState(true)
+  const [generateImages, setGenerateImages] = useState(false)
+  const [error, setError] = useState('')
 
   const handleGenerate = async () => {
     setLoading(true)
+    setError('')
     try {
-      const topic = mode === 'auto' ? 'یک موضوع جذاب از تاریخ ایران' : input
-      const result = await generatePost(topic, contentType)
+      const topic = mode === 'auto' ? undefined : input.trim()
+      const result = await generatePost(topic, contentType, { withReview, generateImages })
       setGeneratedPost(result.post)
-      await createPost(result.post)
-    } catch (e) {
-      alert('خطا در تولید پست')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'خطا در تولید پست')
     } finally {
       setLoading(false)
     }
@@ -38,11 +40,12 @@ export default function CreatePostPage() {
 
   const handleGenerateIdeas = async () => {
     setLoading(true)
+    setError('')
     try {
       const result = await generateIdeas()
       setIdeas(result.ideas)
-    } catch (e) {
-      alert('خطا در تولید ایده')
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'خطا در تولید ایده')
     } finally {
       setLoading(false)
     }
@@ -134,7 +137,7 @@ export default function CreatePostPage() {
     <div className="max-w-4xl mx-auto space-y-8">
       <div className="text-center space-y-2">
         <h1 className="text-3xl font-bold text-surface-900 dark:text-white">ساخت پست جدید</h1>
-        <p className="text-surface-600 dark:text-surface-400">پنچ روش برای تولید محتوای هوشمند انتخاب کنید</p>
+        <p className="text-surface-600 dark:text-surface-400">یکی از چهار روش تولید محتوای هوشمند را انتخاب کنید</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -241,6 +244,39 @@ export default function CreatePostPage() {
                 </div>
               </div>
             </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="flex items-start gap-3 rounded-xl border border-surface-200 dark:border-surface-800 p-4 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={withReview}
+                onChange={(event) => setWithReview(event.target.checked)}
+                className="mt-1 w-4 h-4 accent-primary-600"
+              />
+              <span>
+                <span className="block text-sm font-medium text-surface-900 dark:text-white">بازبینی تحریریه</span>
+                <span className="block text-xs text-surface-500 mt-1">امتیاز کیفیت و بررسی نهایی متن با مدل دقیق‌تر</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 rounded-xl border border-surface-200 dark:border-surface-800 p-4 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={generateImages}
+                onChange={(event) => setGenerateImages(event.target.checked)}
+                className="mt-1 w-4 h-4 accent-primary-600"
+              />
+              <span>
+                <span className="block text-sm font-medium text-surface-900 dark:text-white">ساخت تصویر برای اسلایدها</span>
+                <span className="block text-xs text-surface-500 mt-1">اختیاری و هزینه‌بر؛ برای هر اسلاید یک تصویر تولید می‌شود</span>
+              </span>
+            </label>
+          </div>
+
+          {error && (
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+              {error}
+            </p>
           )}
 
           <div className="pt-4 border-t border-surface-200 dark:border-surface-800">

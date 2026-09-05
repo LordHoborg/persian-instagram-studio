@@ -1,11 +1,11 @@
 import JSZip from 'jszip'
 import { chromium } from 'playwright'
+import path from 'node:path'
 import { PostPackage, PostSlide } from '@/types'
 import { CarouselTemplateId } from '@/components/carousel/carouselMeta'
 
 const EXPORT_WIDTH = 1080
 const EXPORT_HEIGHT = 1350
-const CHROME_PATH = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 
 function getSlideFileLabel(slide: PostSlide) {
   switch (slide.type) {
@@ -17,9 +17,13 @@ function getSlideFileLabel(slide: PostSlide) {
 }
 
 export async function exportCarouselWithBrowser(post: PostPackage, template: CarouselTemplateId, baseUrl: string) {
+  const windowsChromePath = process.platform === 'win32' && process.env.ProgramFiles
+    ? path.join(process.env.ProgramFiles, 'Google', 'Chrome', 'Application', 'chrome.exe')
+    : undefined
+  const executablePath = process.env.CHROME_EXECUTABLE_PATH?.trim() || windowsChromePath
   const browser = await chromium.launch({
     headless: true,
-    executablePath: CHROME_PATH,
+    executablePath,
   })
 
   const context = await browser.newContext({
@@ -34,7 +38,7 @@ export async function exportCarouselWithBrowser(post: PostPackage, template: Car
   try {
     for (const slide of post.slides) {
       const url = `${baseUrl}/export-carousel/${post.id}?slide=${slide.slideNumber - 1}&template=${template}`
-      await page.goto(url, { waitUntil: 'networkidle' })
+      await page.goto(url, { waitUntil: 'domcontentloaded' })
       await page.locator('#carousel-export-root').waitFor({ state: 'visible' })
       await page.evaluate(() => document.fonts.ready)
 

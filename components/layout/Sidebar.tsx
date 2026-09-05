@@ -38,6 +38,8 @@ export function Sidebar() {
       <button
         onClick={() => setMobileOpen(!mobileOpen)}
         className="lg:hidden fixed top-4 right-4 z-50 p-2 bg-white dark:bg-surface-900 rounded-lg shadow-md border border-surface-200"
+        aria-label={mobileOpen ? 'بستن منو' : 'باز کردن منو'}
+        aria-expanded={mobileOpen}
       >
         {mobileOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
@@ -89,21 +91,22 @@ export function Sidebar() {
 
           {/* Instagram Status */}
           <div className="px-4 py-4 border-t border-surface-100 dark:border-surface-800">
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-50 dark:bg-surface-900">
+            <Link href="/settings" className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-50 dark:bg-surface-900 hover:bg-surface-100 dark:hover:bg-surface-800">
               <Instagram size={18} className="text-surface-400" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-surface-700 dark:text-surface-300 truncate">Instagram</p>
-                <p className="text-[10px] text-surface-400">متصل نیست</p>
+                <p className="text-[10px] text-surface-400">مدیریت اتصال</p>
               </div>
-              <div className="w-2 h-2 rounded-full bg-red-400" />
-            </div>
+            </Link>
           </div>
         </div>
       </aside>
 
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div
+        <button
+          type="button"
+          aria-label="بستن منو"
           className="fixed inset-0 bg-black/20 z-30 lg:hidden"
           onClick={() => setMobileOpen(false)}
         />

@@ -1,76 +1,87 @@
 # Persian Instagram Content Studio
 
-استودیو محتوای اینستاگرام فارسی با قدرت هوش مصنوعی.
+استودیوی فارسی و RTL برای ایده‌پردازی، تولید، بازبینی، ویرایش و خروجی گرفتن از محتوای اینستاگرام.
 
 ## شروع سریع
 
+پیش‌نیاز: Node.js 24 تا 26.
+
 ```bash
 npm install
+copy .env.example .env.local
 npm run dev
 ```
 
-برنامه در `http://localhost:3000` اجرا می‌شود.
+برنامه روی `http://localhost:3000` اجرا می‌شود. migrationهای SQLite و داده‌های نمایشی فقط در اولین اجرا به‌صورت خودکار ساخته می‌شوند. فایل دیتابیس محلی داخل `data/` قرار می‌گیرد و در Git ثبت نمی‌شود.
 
-## معماری
-
-- **Next.js 14** با App Router
-- **React + TypeScript**
-- **Tailwind CSS**
-- **Mock AI Provider** (بدون نیاز به API Key برای شروع)
-
-## ساختار پوشه
-
-```
-app/                 # صفحات Next.js
-components/          # کامپوننت‌های React
-  ui/               # کامپوننت‌های پایه
-  layout/           # Sidebar, Header
-  carousel/         # CarouselRenderer
-lib/                # utilities, constants, db, aiService
-services/           # abstraction layers
-  ai/              # AI providers
-  instagram/       # Instagram providers
-types/              # TypeScript interfaces
-```
+حالت پیش‌فرض `USE_MOCK_AI=true` است؛ بنابراین برای بررسی رابط به کلید API نیاز ندارید.
 
 ## اتصال OpenAI
 
-1. `.env.local` بسازید:
-```
+در `.env.local` مقدارهای زیر را تنظیم کنید:
+
+```dotenv
 OPENAI_API_KEY=sk-...
 USE_MOCK_AI=false
 ```
 
-2. در `lib/aiService.ts`، `OpenAIProvider` را جایگزین `MockAIProvider` کنید.
+انتخاب provider در `services/ai/provider.ts` به‌صورت خودکار انجام می‌شود. مدل‌های متن و تصویر نیز از متغیرهای `OPENAI_MODEL_*` قابل تغییرند. ساخت تصویر در فرم تولید پست اختیاری است تا هزینه ناخواسته ایجاد نشود؛ سقف‌های روزانه، ماهانه و تعداد تصویر از صفحه تنظیمات کنترل می‌شوند.
 
-## اتصال Instagram
+## خروجی PNG و ZIP
 
-1. در Meta Developer Dashboard، Instagram Graph API را فعال کنید.
-2. توکن دسترسی را در `.env.local` قرار دهید:
+خروجی کاروسل با مرورگر headless و در ابعاد ۱۰۸۰×۱۳۵۰ ساخته می‌شود. Playwright ابتدا از Chromium همراه خود استفاده می‌کند. برای تعیین مرورگر نصب‌شده می‌توانید این متغیر را تنظیم کنید:
+
+```dotenv
+CHROME_EXECUTABLE_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe
 ```
-INSTAGRAM_ACCESS_TOKEN=...
+
+## فرمان‌های توسعه
+
+```bash
+npm run dev          # سرور توسعه
+npm run build        # build تولید
+npm run start        # اجرای build تولید
+npm run typecheck    # بررسی TypeScript
+npm run lint         # ESLint + قواعد Next.js
+npm test             # تست‌های Vitest
+npm run smoke:export # تست خروجی در برابر سرور اجراشده روی پورت ۳۰۱۷
+npm run smoke:db     # ساخت و بررسی دیتابیس تازه در پوشه موقت
+npm run db:migrate   # اجرای دستی migrationها
+npm run db:seed      # seed دستی دیتابیس
 ```
 
-3. در `services/instagram/`، `InstagramProvider` را پیاده‌سازی کنید.
+## معماری
 
-## ویژگی‌های کلیدی
+- Next.js 16 با App Router و React 19
+- TypeScript و Tailwind CSS 4
+- SQLite، Drizzle ORM و migrationهای نسخه‌بندی‌شده
+- OpenAI Responses API با Structured Outputs و مسیر تحقیق وب
+- provider شبیه‌سازی‌شده برای توسعه بدون API Key
+- Playwright و JSZip برای خروجی تصویری کاروسل
 
-- داشبورد کامل با آمار و هزینه
-- ساخت پست با ۴ حالت (خودکار، موضوع، ایده، الهام)
-- پیش‌نمایش کاروسل با قالب‌های متنوع
-- ویرایشگر اسلاید به اسلاید
-- مغز محتوا (Brand Profile + Content Pillars)
-- آرشیو جستجوپذیر
-- تقویم محتوا
-- آنالیز عملکرد
-- تنظیمات بودجه و اتوماسیون
-- پشتیبانی کامل RTL فارسی
+پوشه‌های اصلی:
 
-## نکات توسعه آینده
+```text
+app/                  صفحات، Server Components و Route Handlers
+components/           اجزای UI، چیدمان و رندر کاروسل
+lib/db/               schema، migration، seed و دسترسی داده
+lib/prompts/          promptهای نسخه‌بندی‌شده
+services/ai/          providerها، routing مدل و جریان تولید محتوا
+services/instagram/   قرارداد provider و پیاده‌سازی شبیه‌سازی‌شده
+__tests__/            تست‌های Vitest
+```
 
-- جایگزینی mock DB با SQLite/Postgres
-- اضافه کردن OpenAIProvider واقعی
-- اضافه کردن Instagram Graph API
-- سیستم export تصاویر (html-to-image)
-- semantic search با embeddings
-- autonomous agent loop
+## امکانات فعلی
+
+- داشبورد هزینه، وضعیت محتوا و الگوهای یادگرفته‌شده
+- چهار مسیر تولید: خودکار، موضوع، ایده خام و منبع الهام
+- تحقیق وب، Structured Output، بازبینی تحریریه و امتیاز کیفیت
+- تولید اختیاری تصویر و ثبت تفکیکی هزینه‌ها
+- ویرایش مطمئن پست و اسلاید، بهبود Hook و بازنویسی با AI
+- پنج قالب کاروسل و دریافت PNG تکی یا ZIP
+- مغز محتوا، آرشیو جست‌وجوپذیر، تقویم، آنالیز و تنظیمات بودجه
+- حالت تیرهٔ ماندگار، صفحات loading/error/404 و هدرهای امنیتی پایه
+
+## محدودیت فعلی
+
+اتصال واقعی Instagram Graph API هنوز پیاده‌سازی نشده و `services/instagram/mockProvider.ts` فقط برای توسعه است. گزینه‌های اتوماسیون در دیتابیس ذخیره می‌شوند، اما scheduler و انتشار خودکار واقعی تا زمان تکمیل provider اینستاگرام فعال نیستند.

@@ -1,3 +1,5 @@
+'use server'
+
 import { getAIProvider } from '@/services/ai/provider'
 import { addAIUsage } from './db'
 import { PostSlide } from '@/types'
@@ -5,13 +7,14 @@ import { getModelForOperation } from '@/services/ai/modelConfig'
 import { calculateImageCost } from './ai/pricing'
 import { buildImproveHookPrompt, buildRewriteSlidePrompt } from './prompts/carouselWriter'
 import { RewrittenSlideSchema, HookImprovementSchema } from '@/services/ai/schemas'
-import { generateId } from './utils'
 
-export { generateDailyPost } from '@/services/ai/generateDailyPost'
-
-export async function generatePost(topic: string, contentType: string = 'carousel') {
+export async function generatePost(
+  topic?: string,
+  contentType: string = 'carousel',
+  options: { withReview?: boolean; generateImages?: boolean } = {}
+) {
   const { generateDailyPost } = await import('@/services/ai/generateDailyPost')
-  return generateDailyPost({ topic, contentType })
+  return generateDailyPost({ topic, contentType, ...options })
 }
 
 export async function generateIdeas(): Promise<{ ideas: string[]; cost: number }> {
@@ -20,10 +23,10 @@ export async function generateIdeas(): Promise<{ ideas: string[]; cost: number }
   const { z } = await import('zod')
   const IdeasSchema = z.object({ ideas: z.array(z.string()).min(1) })
   const result = await provider.generateStructured({
-    operation: 'generate_ideas',
+    operation: 'brainstorm_ideas',
     prompt: '۱۰ ایده جذاب برای پست اینستاگرام درباره تاریخ و فرهنگ ایران پیشنهاد بده.\n\nخروجی JSON: {"ideas": ["ایده ۱", "ایده ۲", ...]}',
     schema: IdeasSchema,
-    model: getModelForOperation('generate_ideas'),
+    model: getModelForOperation('brainstorm_ideas'),
   })
 
   if (!result.success || !result.data) {
@@ -31,9 +34,9 @@ export async function generateIdeas(): Promise<{ ideas: string[]; cost: number }
   }
 
   await addAIUsage({
-    operation: 'generate_ideas',
+    operation: 'brainstorm_ideas',
     provider: 'openai',
-    model: getModelForOperation('generate_ideas'),
+    model: getModelForOperation('brainstorm_ideas'),
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,
     estimatedTextCost: result.usage.estimatedCost,

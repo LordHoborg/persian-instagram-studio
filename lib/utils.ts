@@ -39,11 +39,16 @@ export function estimateTextCost(inputTokens: number, outputTokens: number, mode
     'gpt-3.5': { input: 0.0005, output: 0.0015 },
   }
   const rate = rates[model] || rates['gpt-4o']
-  return (inputTokens / 1000) * rate.input + (outputTokens / 1000) * rate.output
+  return (inputTokens / 1_000_000) * rate.input + (outputTokens / 1_000_000) * rate.output
 }
 
 export function estimateImageCost(count: number, size: string = '1024x1024'): number {
-  return count * 0.04
+  const rates: Record<string, number> = {
+    '1024x1024': 0.04,
+    '1024x1536': 0.08,
+    '1536x1024': 0.08,
+  }
+  return count * (rates[size] ?? rates['1024x1024'])
 }
 
 export function getContentTypeLabel(type: string): string {

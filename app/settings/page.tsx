@@ -13,19 +13,31 @@ export default function SettingsPage() {
   const [integration, setIntegration] = useState<IntegrationStatus | null>(null)
   const [budget, setBudget] = useState<CostBudget | null>(null)
   const [automation, setAutomation] = useState<AutomationSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    Promise.all([getIntegrationStatus(), getBudget(), getAutomationSettings()]).then(
-      ([i, b, a]) => { setIntegration(i); setBudget(b); setAutomation(a) }
-    )
+    Promise.all([getIntegrationStatus(), getBudget(), getAutomationSettings()])
+      .then(([i, b, a]) => { setIntegration(i); setBudget(b); setAutomation(a) })
+      .catch(reason => setLoadError(reason instanceof Error ? reason.message : 'بارگذاری تنظیمات ناموفق بود'))
   }, [])
 
   const handleSave = async () => {
-    if (budget) await updateBudget(budget)
-    if (automation) await updateAutomationSettings(automation)
-    alert('تنظیمات ذخیره شد')
+    if (!budget || !automation || saving) return
+    setSaving(true)
+    setMessage(null)
+    try {
+      await Promise.all([updateBudget(budget), updateAutomationSettings(automation)])
+      setMessage({ kind: 'success', text: 'تنظیمات ذخیره شد.' })
+    } catch (reason: unknown) {
+      setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : 'ذخیره تنظیمات ناموفق بود.' })
+    } finally {
+      setSaving(false)
+    }
   }
 
+  if (loadError) return <p role="alert" className="mx-auto max-w-3xl rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p>
   if (!integration || !budget || !automation) return <div className="text-center py-20">در حال بارگذاری...</div>
 
   return (
@@ -35,8 +47,14 @@ export default function SettingsPage() {
           <Settings size={24} className="text-surface-600" />
           تنظیمات
         </h1>
-        <Button onClick={handleSave}>ذخیره</Button>
+        <Button onClick={handleSave} loading={saving} disabled={saving}>ذخیره</Button>
       </div>
+
+      {message && (
+        <p role="status" className={`rounded-lg px-4 py-3 text-sm ${message.kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+          {message.text}
+        </p>
+      )}
 
       <Card>
         <CardHeader>
@@ -51,7 +69,7 @@ export default function SettingsPage() {
               <div className="w-8 h-8 rounded bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-xs">AI</div>
               <div>
                 <p className="text-sm font-medium">OpenAI</p>
-                <p className="text-xs text-surface-500">GPT-4o, DALL-E 3</p>
+                <p className="text-xs text-surface-500">GPT-5.6 و GPT Image</p>
               </div>
             </div>
             <Badge variant={integration.openai.configured ? 'success' : 'warning'}>
@@ -97,15 +115,19 @@ export default function SettingsPage() {
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-sm text-surface-500 mb-1 block">بودجه روزانه ($)</label>
-            <Input type="number" value={budget.dailyBudget} onChange={(e) => setBudget({ ...budget, dailyBudget: parseFloat(e.target.value) })} />
+            <Input type="number" min={0} step="0.1" value={budget.dailyBudget} onChange={(e) => setBudget({ ...budget, dailyBudget: Number(e.target.value) })} />
           </div>
           <div>
             <label className="text-sm text-surface-500 mb-1 block">بودجه ماهانه ($)</label>
-            <Input type="number" value={budget.monthlyBudget} onChange={(e) => setBudget({ ...budget, monthlyBudget: parseFloat(e.target.value) })} />
+            <Input type="number" min={0} step="1" value={budget.monthlyBudget} onChange={(e) => setBudget({ ...budget, monthlyBudget: Number(e.target.value) })} />
           </div>
           <div>
             <label className="text-sm text-surface-500 mb-1 block">حد تصویر در ماه</label>
-            <Input type="number" value={budget.imageGenerationLimit} onChange={(e) => setBudget({ ...budget, imageGenerationLimit: parseInt(e.target.value) })} />
+            <Input type="number" min={0} step="1" value={budget.imageGenerationLimit} onChange={(e) => setBudget({ ...budget, imageGenerationLimit: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label className="text-sm text-surface-500 mb-1 block">حداکثر تلاش مجدد</label>
+            <Input type="number" min={0} max={10} step="1" value={budget.maxRetries} onChange={(e) => setBudget({ ...budget, maxRetries: Number(e.target.value) })} />
           </div>
         </CardContent>
       </Card>
@@ -118,6 +140,62 @@ export default function SettingsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm text-surface-500 mb-1 block">ساعت پیشنهادی انتشار</label>
+              <Input type="number" min={0} max={23} value={automation.suggestedHour} onChange={(e) => setAutomation({ ...automation, suggestedHour: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label className="text-sm text-surface-500 mb-1 block">تعداد پست روزانه</label>
+              <Input type="number" min={1} max={10} value={automation.postsPerDay} onChange={(e) => setAutomation({ ...automation, postsPerDay: Number(e.target.value) })} />
+            </div>
+          </div>
+          <div>
+            <p className="text-sm text-surface-500 mb-2">روزهای انتشار</p>
+            <div className="flex flex-wrap gap-2">
+              {['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'].map(day => (
+                <button
+                  type="button"
+                  key={day}
+                  onClick={() => setAutomation({
+                    ...automation,
+                    publishDays: automation.publishDays.includes(day)
+                      ? automation.publishDays.filter(item => item !== day)
+                      : [...automation.publishDays, day],
+                  })}
+                  className={`rounded-lg px-3 py-1.5 text-sm ${automation.publishDays.includes(day) ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'bg-surface-100 text-surface-500 dark:bg-surface-800'}`}
+                >
+                  {day}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-sm text-surface-500 mb-2">فرمت‌های مجاز</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: 'carousel', label: 'کاروسل' },
+                { id: 'single', label: 'تک‌تصویر' },
+                { id: 'quote', label: 'نقل‌قول' },
+                { id: 'reel', label: 'ریل' },
+                { id: 'story', label: 'استوری' },
+              ].map(format => (
+                <button
+                  type="button"
+                  key={format.id}
+                  onClick={() => setAutomation({
+                    ...automation,
+                    allowedFormats: automation.allowedFormats.includes(format.id)
+                      ? automation.allowedFormats.filter(item => item !== format.id)
+                      : [...automation.allowedFormats, format.id],
+                  })}
+                  className={`rounded-lg px-3 py-1.5 text-sm ${automation.allowedFormats.includes(format.id) ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'bg-surface-100 text-surface-500 dark:bg-surface-800'}`}
+                >
+                  {format.label}
+                </button>
+              ))}
+            </div>
+          </div>
           {[
             { key: 'autoGenerate', label: 'تولید خودکار محتوا' },
             { key: 'autoPublish', label: 'انتشار خودکار' },
@@ -128,11 +206,17 @@ export default function SettingsPage() {
               <input
                 type="checkbox"
                 checked={automation[item.key as keyof AutomationSettings] as boolean}
+                disabled={item.key === 'autoPublish' && !integration.instagram.connected}
                 onChange={(e) => setAutomation({ ...automation, [item.key]: e.target.checked })}
-                className="w-5 h-5 rounded border-surface-300 text-primary-600 focus:ring-primary-500"
+                className="w-5 h-5 rounded border-surface-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
           ))}
+          {!integration.instagram.connected && (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              انتشار خودکار تا زمان اتصال Instagram Graph API غیرفعال است.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -17,12 +17,14 @@ import { ensureSeeded } from './seed'
 
 // ─── Initialization ──────────────────────────────────────────────────────────
 
-let initialized = false
+let initializationPromise: Promise<void> | null = null
 
 async function ensureInitialized() {
-  if (initialized) return
-  initialized = true
-  await ensureSeeded()
+  initializationPromise ??= ensureSeeded().catch(error => {
+    initializationPromise = null
+    throw error
+  })
+  await initializationPromise
 }
 
 // ─── Helper: row → PostPackage ───────────────────────────────────────────────
@@ -159,74 +161,10 @@ export async function createPost(
   return (await getPostById(id))!
 }
 
-export async function updatePost(id: string, updates: Partial<PostPackage>): Promise<PostPackage | null> {
-  await ensureInitialized()
-  const existing = await getPostById(id)
-  if (!existing) return null
-
-  const now = new Date().toISOString()
-
-  await db.update(posts).set({
-    title: updates.title ?? existing.title,
-    topic: updates.topic ?? existing.topic,
-    contentType: updates.contentType ?? existing.contentType,
-    contentPillar: updates.contentPillar ?? existing.contentPillar,
-    goal: updates.goal ?? existing.goal,
-    targetAudience: updates.targetAudience ?? existing.targetAudience,
-    hook: updates.hook ?? existing.hook,
-    caption: updates.caption ?? existing.caption,
-    cta: updates.cta ?? existing.cta,
-    hashtags: updates.hashtags ?? existing.hashtags,
-    imageStyle: updates.imageStyle ?? existing.imageStyle,
-    status: updates.status ?? existing.status,
-    scheduledAt: updates.scheduledAt ?? existing.scheduledAt,
-    publishedAt: updates.publishedAt ?? existing.publishedAt,
-    estimatedCost: updates.estimatedCost ?? existing.estimatedCost,
-    qualityScore: updates.qualityScore ?? existing.qualityScore ?? null,
-    updatedAt: now,
-  }).where(eq(posts.id, id))
-
-  if (updates.slides) {
-    await db.delete(postSlides).where(eq(postSlides.postId, id))
-    if (updates.slides.length) {
-      const slideValues = updates.slides.map(s => ({
-        id: generateId(),
-        postId: id,
-        slideNumber: s.slideNumber,
-        type: s.type,
-        headline: s.headline,
-        body: s.body,
-        visualDirection: s.visualDirection,
-        imagePrompt: s.imagePrompt,
-        imageAssetId: s.imageAssetId ?? null,
-      }))
-      await db.insert(postSlides).values(slideValues)
-    }
-  }
-
-  if (updates.sources) {
-    await db.delete(sources).where(eq(sources.postId, id))
-    if (updates.sources.length) {
-      const sourceValues = updates.sources.map(s => ({
-        id: generateId(),
-        postId: id,
-        title: s.title,
-        url: s.url,
-        publisher: s.publisher,
-        publishedAt: s.date || null,
-        verificationStatus: s.verificationStatus ?? s.verified ?? 'unverified',
-      }))
-      await db.insert(sources).values(sourceValues)
-    }
-  }
-
-  return getPostById(id)
-}
-
 export async function deletePost(id: string): Promise<boolean> {
   await ensureInitialized()
-  const result = await db.delete(posts).where(eq(posts.id, id))
-  return ((result as any).changes ?? 0) > 0
+  const deleted = await db.delete(posts).where(eq(posts.id, id)).returning({ id: posts.id })
+  return deleted.length > 0
 }
 
 // ─── Pillars ─────────────────────────────────────────────────────────────────
@@ -246,7 +184,19 @@ export async function getPillars(): Promise<ContentPillar[]> {
 
 export async function updatePillars(pillars: ContentPillar[]): Promise<void> {
   await ensureInitialized()
-  for (const p of pillars) {
+  const normalized = pillars.slice(0, 50).map(p => ({
+    ...p,
+    id: p.id.trim(),
+    name: p.name.trim(),
+    description: p.description.trim(),
+    weight: Math.min(100, Math.max(0, Math.round(p.weight))),
+  }))
+
+  if (normalized.some(p => !p.id || !p.name)) {
+    throw new Error('شناسه و نام ستون محتوا الزامی است')
+  }
+
+  for (const p of normalized) {
     await db.insert(contentPillars).values({
       id: p.id,
       name: p.name,
@@ -290,12 +240,13 @@ export async function getBrandProfile(): Promise<BrandProfile> {
   }
 }
 
-export async function updateBrandProfile(profile: BrandProfile): Promise<void> {
+export async function updateBrandProfile(profile: Partial<BrandProfile>): Promise<void> {
   await ensureInitialized()
   const now = new Date().toISOString()
   const existing = await db.select().from(brandProfile).limit(1)
   if (existing.length === 0) {
-    await db.insert(brandProfile).values({ ...profile, updatedAt: now })
+    const defaults = await getBrandProfile()
+    await db.insert(brandProfile).values({ ...defaults, ...profile, updatedAt: now })
   } else {
     await db.update(brandProfile).set({ ...profile, updatedAt: now })
   }
@@ -400,27 +351,20 @@ export async function getAutomationSettings(): Promise<AutomationSettings> {
 
 export async function updateAutomationSettings(settings: AutomationSettings): Promise<void> {
   await ensureInitialized()
+  const normalized: AutomationSettings = {
+    publishDays: settings.publishDays.slice(0, 7),
+    suggestedHour: Math.min(23, Math.max(0, Math.round(settings.suggestedHour))),
+    postsPerDay: Math.min(10, Math.max(1, Math.round(settings.postsPerDay))),
+    allowedFormats: settings.allowedFormats.slice(0, 5),
+    autoGenerate: Boolean(settings.autoGenerate),
+    autoPublish: Boolean(settings.autoPublish),
+    requireApproval: Boolean(settings.requireApproval),
+  }
   const existing = await db.select().from(automationSettings).limit(1)
   if (existing.length === 0) {
-    await db.insert(automationSettings).values({
-      publishDays: settings.publishDays,
-      suggestedHour: settings.suggestedHour,
-      postsPerDay: settings.postsPerDay,
-      allowedFormats: settings.allowedFormats,
-      autoGenerate: settings.autoGenerate,
-      autoPublish: settings.autoPublish,
-      requireApproval: settings.requireApproval,
-    })
+    await db.insert(automationSettings).values(normalized)
   } else {
-    await db.update(automationSettings).set({
-      publishDays: settings.publishDays,
-      suggestedHour: settings.suggestedHour,
-      postsPerDay: settings.postsPerDay,
-      allowedFormats: settings.allowedFormats,
-      autoGenerate: settings.autoGenerate,
-      autoPublish: settings.autoPublish,
-      requireApproval: settings.requireApproval,
-    })
+    await db.update(automationSettings).set(normalized)
   }
 }
 
@@ -477,8 +421,15 @@ export async function getBudget(): Promise<CostBudget> {
 export async function updateBudget(budget: CostBudget): Promise<void> {
   await ensureInitialized()
   const now = new Date().toISOString()
-  await db.insert(appSettings).values({ key: 'cost_budget', value: budget, updatedAt: now })
-    .onConflictDoUpdate({ target: appSettings.key, set: { value: budget, updatedAt: now } })
+  const finiteOr = (value: number, fallback: number) => Number.isFinite(value) ? value : fallback
+  const normalized: CostBudget = {
+    dailyBudget: Math.max(0, finiteOr(budget.dailyBudget, 2)),
+    monthlyBudget: Math.max(0, finiteOr(budget.monthlyBudget, 30)),
+    imageGenerationLimit: Math.max(0, Math.round(finiteOr(budget.imageGenerationLimit, 50))),
+    maxRetries: Math.min(10, Math.max(0, Math.round(finiteOr(budget.maxRetries, 3)))),
+  }
+  await db.insert(appSettings).values({ key: 'cost_budget', value: normalized, updatedAt: now })
+    .onConflictDoUpdate({ target: appSettings.key, set: { value: normalized, updatedAt: now } })
 }
 
 // ─── Prompts ─────────────────────────────────────────────────────────────────

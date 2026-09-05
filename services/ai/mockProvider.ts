@@ -1,6 +1,7 @@
 import { AIProviderInterface, AIGenerationRequest, StructuredGenerationRequest, AIGenerationResult, AIModelConfig, GeneratedImageResult, ResearchSource } from './types'
 import { PostPackage, PostSlide } from '@/types'
-import { generateId, estimateTextCost } from '@/lib/utils'
+import { generateId } from '@/lib/utils'
+import { calculateImageCost, calculateTextCost } from '@/lib/ai/pricing'
 import { MOCK_POST_TOPICS } from '@/lib/constants'
 import { MODEL_CONFIG } from './modelConfig'
 
@@ -53,7 +54,7 @@ export class MockAIProvider implements AIProviderInterface {
     const inputTokens = estimateTokens(request.prompt)
     const outputText = this.generateMockText(request)
     const outputTokens = estimateTokens(outputText)
-    const cost = estimateTextCost(inputTokens, outputTokens, request.model || 'gpt-4o')
+    const cost = calculateTextCost(request.model || 'gpt-4o', inputTokens, outputTokens)
 
     return {
       success: true,
@@ -71,10 +72,12 @@ export class MockAIProvider implements AIProviderInterface {
       data = this.generateMockPost(request.prompt)
     } else if (request.operation === 'generate_ideas') {
       data = this.generateMockTopicCandidates()
+    } else if (request.operation === 'brainstorm_ideas') {
+      data = { ideas: this.generateMockTopicCandidates().candidates.map(candidate => candidate.topic) }
     } else if (request.operation === 'research_topic') {
       data = this.generateMockResearchSummary(request.prompt)
     } else if (request.operation === 'rewrite_slide') {
-      data = this.generateMockSlideRewrite(request.prompt)
+      data = this.generateMockSlideRewrite()
     } else if (request.operation === 'improve_hook') {
       data = { hook: getRandom(PERSIAN_HOOKS).replace(/{topic}/g, 'این موضوع'), reasoning: 'نسخه بهبود یافته' }
     } else if (request.operation === 'editorial_review') {
@@ -89,7 +92,7 @@ export class MockAIProvider implements AIProviderInterface {
     }
 
     const outputTokens = estimateTokens(JSON.stringify(data))
-    const cost = estimateTextCost(inputTokens, outputTokens, request.model || MODEL_CONFIG.standard)
+    const cost = calculateTextCost(request.model || MODEL_CONFIG.standard, inputTokens, outputTokens)
 
     return {
       success: true,
@@ -104,7 +107,7 @@ export class MockAIProvider implements AIProviderInterface {
     const summary = this.generateMockResearchSummary(request.prompt)
     const sources = this.generateMockResearchSources(request.prompt)
     const outputTokens = estimateTokens(JSON.stringify(summary))
-    const cost = estimateTextCost(inputTokens, outputTokens, request.model || MODEL_CONFIG.standard)
+    const cost = calculateTextCost(request.model || MODEL_CONFIG.standard, inputTokens, outputTokens)
 
     return {
       success: true,
@@ -123,10 +126,11 @@ export class MockAIProvider implements AIProviderInterface {
     }
   }
 
-  async generateImage(prompt: string, size = '1024x1024'): Promise<AIGenerationResult<GeneratedImageResult>> {
+  async generateImage(_prompt: string, size = '1024x1024'): Promise<AIGenerationResult<GeneratedImageResult>> {
     await this.simulateDelay(1500)
     const colors = ['1a1a2e', '0f172a', '3d2b1f', 'fafafa', 'fef3c7']
     const color = colors[Math.floor(Math.random() * colors.length)]
+    const imageCost = calculateImageCost(MODEL_CONFIG.image, 1, { size })
     return {
       success: true,
       data: {
@@ -136,7 +140,7 @@ export class MockAIProvider implements AIProviderInterface {
         model: MODEL_CONFIG.image,
         size,
       },
-      usage: { inputTokens: 0, outputTokens: 0, estimatedCost: 0.04, imageGenerationCount: 1, imageCost: 0.04 },
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCost: imageCost, imageGenerationCount: 1, imageCost },
     }
   }
 
@@ -159,8 +163,9 @@ export class MockAIProvider implements AIProviderInterface {
       ? prompt.split('موضوع:')[1].split('\n')[0].trim()
       : getRandom(MOCK_POST_TOPICS)
 
+    const contentType = (['single', 'carousel', 'quote', 'story', 'reel'].find(type => prompt.includes(type)) ?? 'carousel') as PostPackage['contentType']
     const hook = getRandom(PERSIAN_HOOKS).replace(/{topic}/g, topic)
-    const slideCount = Math.floor(Math.random() * 6) + 3
+    const slideCount = contentType === 'carousel' ? Math.floor(Math.random() * 6) + 3 : 1
     const slides: PostSlide[] = []
 
     slides.push({
@@ -189,7 +194,7 @@ export class MockAIProvider implements AIProviderInterface {
       id: generateId(),
       title: topic,
       topic,
-      contentType: 'carousel',
+      contentType,
       contentPillar: getRandom(['تاریخ', 'علم', 'تهران قدیم', 'فرهنگ']),
       goal: 'آموزش و جذب مخاطب',
       targetAudience: 'جوانان علاقه‌مند',
@@ -271,7 +276,7 @@ export class MockAIProvider implements AIProviderInterface {
     }
   }
 
-  private generateMockSlideRewrite(prompt: string): PostSlide {
+  private generateMockSlideRewrite(): PostSlide {
     return {
       id: generateId(),
       slideNumber: 1,

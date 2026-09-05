@@ -20,6 +20,7 @@ export type ModelId = (typeof MODEL_CONFIG)[ModelTier]
 export const OPERATION_MODEL_MAP: Record<string, ModelTier> = {
   generate_post: 'standard',
   generate_ideas: 'cheap',
+  brainstorm_ideas: 'cheap',
   rewrite_slide: 'cheap',
   improve_hook: 'cheap',
   generate_caption: 'cheap',
